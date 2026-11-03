@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Literata", Georgia, ui-serif, serif;
+}
+
+:root {
+  /* Overwritten from the active reading theme (src/lib/settings.ts). */
+  --bg: #f3f1ec;
+  --fg: #2b2925;
+  --muted: #7a756b;
+  --surface: #fbfaf7;
+  --line: #dedad1;
+  --link: #2f5c74;
+  --ribbon: #a33a45;
+  --on-ribbon: #ffffff;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+button {
+  cursor: pointer;
+}
+
+input[type="range"] {
+  accent-color: var(--ribbon);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

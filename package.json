@@ -1,0 +1,38 @@
+{
+  "name": "ribbon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Personal cross-device ebook reader (EPUB, MOBI/AZW3, PDF) with progress synced through Convex.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p . && tsc -p convex",
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy",
+    "keys": "node scripts/convex-keys.mjs",
+    "allowlist:list": "convex run allowlist:list",
+    "allowlist:grant": "convex run allowlist:grant",
+    "allowlist:revoke": "convex run allowlist:revoke"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.4",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "jose": "^6.2.15",
+    "tailwindcss": "^4.3.4",
+    "typescript": "~5.9",
+    "vite": "^8.3.5"
+  },
+  "dependencies": {
+    "@auth/core": "^0.41.3",
+    "@convex-dev/auth": "^0.0.96",
+    "convex": "^1.49.0",
+    "idb-keyval": "^6.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}
