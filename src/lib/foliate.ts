@@ -42,6 +42,9 @@ export interface FoliateView extends HTMLElement {
   next(): Promise<void>;
   prev(): Promise<void>;
   getSectionFractions(): number[];
+  getCFI(index: number, range: Range): string;
+  addAnnotation(a: { value: string }): Promise<unknown>;
+  deleteAnnotation(a: { value: string }): Promise<unknown>;
 }
 
 type ViewModule = { makeBook: (file: File) => Promise<FoliateBook> };

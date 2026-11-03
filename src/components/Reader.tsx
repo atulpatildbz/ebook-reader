@@ -8,8 +8,9 @@ import { applyToView } from "../lib/bookStyles";
 import { deviceId, deviceName } from "../lib/device";
 import { openLibrary } from "../lib/route";
 import { setSettings, useSettings, useTheme } from "../lib/settings";
-import { Back, Contents, Moon, RibbonMark, Sun, Type } from "./icons";
-import { ContentsPanel, SettingsPanel } from "./ReaderPanels";
+import { normalizeQuery, searchBook } from "../lib/search";
+import { Back, Close, Contents, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "./icons";
+import { ContentsPanel, SearchPanel, SettingsPanel, type SearchState } from "./ReaderPanels";
 
 export type Remote = { cfi: string; fraction: number; chapter: string | null; device: string; deviceName: string; updatedAt: number };
 export type ReaderBook = { title: string; author: string; fileName: string; sha256: string; fileUrl: string | null };
@@ -53,9 +54,11 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const [loc, setLoc] = useState<RelocateDetail | null>(null);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [chrome, setChrome] = useState(false);
-  const [panel, setPanel] = useState<"contents" | "settings" | null>(null);
+  const [panel, setPanel] = useState<"contents" | "settings" | "search" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [offer, setOffer] = useState<Remote | null>(null);
+  const [search, setSearch] = useState<SearchState>({ query: "", hits: [], progress: 0, running: false });
+  const [active, setActive] = useState<number | null>(null); // the match on screen
 
   const host = useRef<HTMLDivElement>(null);
   const remoteRef = useRef(remote);
@@ -75,6 +78,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   // never reopens the book.
   const saveRef = useRef(save);
   saveRef.current = save;
+  const searchAbort = useRef<AbortController | null>(null);
+  const returnTo = useRef<string | null>(null); // where the reader was before jumping to a match
+  const mark = useRef<{ value: string; index: number } | null>(null); // the highlighted match
 
   // 1. Get the file: from this browser's cache, else download it once.
   const fileUrl = book?.fileUrl;
@@ -152,17 +158,23 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
 
   const onKey = useCallback(
     (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key;
+      if (k === "Escape") {
+        setPanel(null);
+        setChrome(false);
+        return;
+      }
+      if (((e.metaKey || e.ctrlKey) && k === "f" && !e.altKey) || (k === "/" && !(e.target instanceof HTMLInputElement))) {
+        e.preventDefault();
+        setPanel("search");
+        return;
+      }
+      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
       if (k === "ArrowLeft" || k === "h") navigate("left");
       else if (k === "ArrowRight" || k === "l") navigate("right");
       else if (k === "PageDown" || (k === " " && !e.shiftKey) || k === "j") navigate("next");
       else if (k === "PageUp" || (k === " " && e.shiftKey) || k === "k") navigate("prev");
-      else if (k === "Escape") {
-        setPanel(null);
-        setChrome(false);
-        return;
-      } else return;
+      else return;
       e.preventDefault();
     },
     [navigate],
@@ -182,6 +194,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     let shown: string | null = null; // CFI of the page on screen, from the last relocate
     (async () => {
       await loadFoliate();
+      const { Overlayer } = (await import(/* @vite-ignore */ `${import.meta.env.BASE_URL}foliate-js/overlayer.js`)) as {
+        Overlayer: { highlight: unknown };
+      };
       if (cancelled) return;
       v = document.createElement("foliate-view") as FoliateView;
       v.style.cssText = "display:block;width:100%;height:100%";
@@ -231,6 +246,15 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
           // page on the next frame; turning the page before that would be undone by it.
           requestAnimationFrame(() => requestAnimationFrame(() => tap(x)));
         });
+      });
+      // The found match, highlighted in the ribbon colour; redrawn whenever its chapter is laid out again.
+      v.addEventListener("draw-annotation", (e) => {
+        const { draw } = (e as CustomEvent<{ draw: (f: unknown, o: object) => void }>).detail;
+        draw(Overlayer.highlight, { color: themeRef.current.ribbon });
+      });
+      v.addEventListener("create-overlay", (e) => {
+        const m = mark.current;
+        if (m && (e as CustomEvent<{ index: number }>).detail.index === m.index) void v!.addAnnotation({ value: m.value });
       });
       v.addEventListener("external-link", (e) => {
         e.preventDefault();
@@ -297,6 +321,68 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     await view.goTo(r.cfi);
   };
 
+  // Finding text: search the whole book, jump to a match, and come back if it was the wrong one.
+  const runSearch = useCallback(
+    (query: string) => {
+      searchAbort.current?.abort();
+      const ctrl = new AbortController();
+      searchAbort.current = ctrl;
+      setActive(null);
+      const enough = normalizeQuery(query).length >= 2;
+      setSearch({ query, hits: [], progress: 0, running: enough });
+      if (!view || !enough) return;
+      searchBook(view, query, {
+        signal: ctrl.signal,
+        onHits: (hits) => !ctrl.signal.aborted && setSearch((s) => ({ ...s, hits: [...s.hits, ...hits] })),
+        onProgress: (progress) => !ctrl.signal.aborted && setSearch((s) => ({ ...s, progress })),
+      })
+        .catch((e) => console.error("Search failed", e))
+        .finally(() => !ctrl.signal.aborted && setSearch((s) => ({ ...s, running: false, progress: 1 })));
+    },
+    [view],
+  );
+
+  const unmark = () => {
+    if (mark.current && view) void view.deleteAnnotation({ value: mark.current.value });
+    mark.current = null;
+  };
+
+  const showHit = async (i: number) => {
+    const hit = search.hits[i];
+    if (!view || !hit) return;
+    returnTo.current ??= last.current?.cfi ?? view.lastLocation?.cfi ?? null;
+    setActive(i);
+    // Jumping to a match is the reader moving on: it becomes the synced position.
+    interactedAt.current = Date.now();
+    following.current = null;
+    unmark();
+    mark.current = { value: hit.cfi, index: hit.section };
+    await view.goTo(hit.cfi);
+    if (mark.current?.value === hit.cfi) await view.addAnnotation({ value: hit.cfi });
+  };
+
+  const step = (d: 1 | -1) => {
+    const n = search.hits.length;
+    if (active !== null && n) void showHit((active + d + n) % n);
+  };
+
+  const endSearch = () => {
+    unmark();
+    setActive(null);
+    returnTo.current = null;
+  };
+
+  const goBack = async () => {
+    const back = returnTo.current;
+    endSearch();
+    if (back && view) {
+      interactedAt.current = Date.now();
+      await view.goTo(back);
+    }
+  };
+
+  useEffect(() => () => searchAbort.current?.abort(), []);
+
   useEffect(() => {
     if (!notice) return;
     const t = window.setTimeout(() => setNotice(null), 4500);
@@ -318,6 +404,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const chapter = loc?.tocItem?.label?.trim();
   const pageInfo = fixed && loc?.section ? `Page ${loc.section.current + 1} of ${loc.section.total}` : timeLeft(loc?.time?.section);
   const showChrome = chrome || panel !== null;
+  const canSearch = !!view?.book.sections.some((s) => (s as { createDocument?: unknown }).createDocument);
 
   return (
     <div className="fixed inset-0 overflow-clip bg-[var(--bg)] select-none" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
@@ -380,6 +467,11 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
             <p className="truncate font-serif font-medium">{book?.title}</p>
             {book?.author && <p className="truncate text-xs text-[var(--muted)]">{book.author}</p>}
           </div>
+          {canSearch && (
+            <IconButton label="Find in book" onClick={() => setPanel(panel === "search" ? null : "search")} active={panel === "search"}>
+              <Search />
+            </IconButton>
+          )}
           {toc.length > 0 && (
             <IconButton label="Contents" onClick={() => setPanel(panel === "contents" ? null : "contents")} active={panel === "contents"}>
               <Contents />
@@ -422,6 +514,44 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
         />
       )}
       {panel === "settings" && <SettingsPanel fixed={fixed} onClose={() => setPanel(null)} />}
+      {panel === "search" && view && (
+        <SearchPanel
+          state={search}
+          active={active}
+          onSearch={runSearch}
+          onClose={() => setPanel(null)}
+          onPick={(i) => {
+            void showHit(i);
+            setPanel(null);
+            setChrome(false);
+          }}
+        />
+      )}
+
+      {/* The match on screen: step through the others, or go back to where reading was. */}
+      {active !== null && panel !== "search" && (
+        <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center px-4" style={{ top: "calc(env(safe-area-inset-top) + 12px)" }}>
+          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[var(--line)] bg-[var(--surface)] py-1 pr-1 pl-2 text-sm shadow-lg">
+            <button onClick={() => setPanel("search")} className="rounded-full px-2 py-1.5 tabular-nums" title="Show all matches">
+              {active + 1} of {search.hits.length}
+            </button>
+            <IconButton label="Previous match" onClick={() => step(-1)}>
+              <Prev />
+            </IconButton>
+            <IconButton label="Next match" onClick={() => step(1)}>
+              <Next />
+            </IconButton>
+            {returnTo.current && (
+              <button onClick={() => void goBack()} className="rounded-full px-3 py-1.5 text-[var(--muted)] hover:text-[var(--fg)]">
+                Go back
+              </button>
+            )}
+            <IconButton label="Done" onClick={endSearch}>
+              <Close />
+            </IconButton>
+          </div>
+        </div>
+      )}
 
       {/* Sync messages. */}
       <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center px-4" style={{ bottom: "calc(env(safe-area-inset-bottom) + 56px)" }}>

@@ -28,3 +28,6 @@ export const Type = ({ className }: P) => (
     <text x="13" y="18" fontFamily="Literata, Georgia, serif" fontSize="11" fontWeight="500">a</text>
   </svg>
 );
+export const Search = (p: P) => <Stroke {...p} d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4.2-4.2" />;
+export const Prev = (p: P) => <Stroke {...p} d="M15 6l-6 6 6 6" />;
+export const Next = (p: P) => <Stroke {...p} d="M9 6l6 6-6 6" />;
