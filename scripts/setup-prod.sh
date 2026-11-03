@@ -29,7 +29,7 @@ if ! gh repo view "$REPO" >/dev/null 2>&1; then
   gh repo create "$REPO" --public \
     --description "Ribbon: a personal cross-device ebook reader (EPUB, MOBI, AZW3, PDF) with progress synced through Convex"
 fi
-git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$REPO.git"
+git remote get-url origin >/dev/null 2>&1 || git remote add origin "git@github.com:$REPO.git"
 
 echo "5/6  Pages from GitHub Actions, pointed at the prod backend"
 gh variable set CONVEX_URL --repo "$REPO" --body "$CONVEX_URL"
