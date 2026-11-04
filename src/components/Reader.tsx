@@ -3,7 +3,8 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { download, getCached, getLocalProgress, putCached, setLocalProgress, type LocalProgress } from "../lib/bookCache";
-import { loadFoliate, type FoliateView, type RelocateDetail, type TocItem } from "../lib/foliate";
+import { loadFoliate, type FoliateView, type RelocateDetail, type Target, type TocItem } from "../lib/foliate";
+import { toXPointer, xpointerToCFI } from "../lib/xpointer";
 import { applyToView } from "../lib/bookStyles";
 import { deviceId, deviceName } from "../lib/device";
 import { openLibrary } from "../lib/route";
@@ -12,11 +13,13 @@ import { normalizeQuery, searchBook } from "../lib/search";
 import { Back, Close, Contents, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "./icons";
 import { ContentsPanel, SearchPanel, SettingsPanel, type SearchState } from "./ReaderPanels";
 
-export type Remote = { cfi: string; fraction: number; chapter: string | null; device: string; deviceName: string; updatedAt: number };
+/** The synced position. From an e-reader it has no CFI, only a KOReader XPointer (see lib/xpointer). */
+export type Remote = { cfi: string; xpointer?: string | null; fraction: number; chapter: string | null; device: string; deviceName: string; updatedAt: number };
 export type ReaderBook = { title: string; author: string; fileName: string; sha256: string; fileUrl: string | null };
 export type SavePosition = (p: {
   bookId: Id<"books">;
   cfi: string;
+  xpointer?: string;
   fraction: number;
   chapter?: string;
   device: string;
@@ -25,6 +28,22 @@ export type SavePosition = (p: {
 }) => Promise<unknown>;
 
 const pct = (f: number) => `${Math.round(f * 100)}%`;
+
+/** Where a synced position is in this book: its CFI, else the e-reader's XPointer, else the percentage. */
+async function placeOf(view: FoliateView, r: Remote): Promise<Target> {
+  if (r.cfi) return r.cfi;
+  return (r.xpointer && !view.isFixedLayout && (await xpointerToCFI(view, r.xpointer))) || { fraction: r.fraction };
+}
+
+/** The position as e-readers name it (reflowable books only). */
+function xpointerOf(view: FoliateView | null, d: RelocateDetail) {
+  if (!view || view.isFixedLayout || !d.range || d.section === undefined) return undefined;
+  try {
+    return toXPointer(d.section.current, d.range) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 function timeLeft(min?: number) {
   if (min === undefined || !isFinite(min)) return "";
   if (min < 1) return "Less than a minute left in chapter";
@@ -114,7 +133,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     const p = last.current;
     if (!p || p.pushed || p.cfi === pushedCfi.current) return;
     pushedCfi.current = p.cfi;
-    saveRef.current({ bookId, cfi: p.cfi, fraction: p.fraction, chapter: p.chapter, device: deviceId, deviceName, updatedAt: p.updatedAt })
+    saveRef.current({ bookId, cfi: p.cfi, xpointer: p.xpointer, fraction: p.fraction, chapter: p.chapter, device: deviceId, deviceName, updatedAt: p.updatedAt })
       .then(() => {
         if (last.current === p) {
           last.current = { ...p, pushed: true };
@@ -220,7 +239,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
         following.current = null;
         // Only a move the reader made (not a resize reflowing the page) becomes the new position.
         if (last.current && (!moved || Date.now() - interactedAt.current > 4000)) return;
-        last.current = { cfi: d.cfi, fraction: d.fraction, chapter: d.tocItem?.label?.trim(), updatedAt: Date.now(), pushed: false };
+        last.current = { cfi: d.cfi, xpointer: xpointerOf(v, d), fraction: d.fraction, chapter: d.tocItem?.label?.trim(), updatedAt: Date.now(), pushed: false };
         setLocalProgress(bookId, last.current);
         setOffer(null);
         window.clearTimeout(pushTimer.current);
@@ -270,11 +289,13 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
       // Start at the newest position: this device's own, or the synced one from another device.
       const local = getLocalProgress(bookId);
       const r = remoteRef.current;
-      let start: string | null = null;
+      let start: Target | null = null;
       if (r && (!local || r.updatedAt > local.updatedAt)) {
-        start = r.cfi;
-        last.current = { cfi: r.cfi, fraction: r.fraction, chapter: r.chapter ?? undefined, updatedAt: r.updatedAt, pushed: true };
-        pushedCfi.current = r.cfi;
+        start = await placeOf(v, r);
+        if (cancelled) return;
+        const cfi = typeof start === "string" ? start : "";
+        last.current = { cfi, xpointer: r.xpointer ?? undefined, fraction: r.fraction, chapter: r.chapter ?? undefined, updatedAt: r.updatedAt, pushed: true };
+        pushedCfi.current = cfi;
         setLocalProgress(bookId, last.current);
         if (r.device !== deviceId) setNotice(`Picked up where you left off on ${r.deviceName}`);
       } else if (local) {
@@ -318,7 +339,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     interactedAt.current = 0;
     following.current = { until: Date.now() + 2000, updatedAt: r.updatedAt };
     setOffer(null);
-    await view.goTo(r.cfi);
+    await view.goTo(await placeOf(view, r));
   };
 
   // Finding text: search the whole book, jump to a match, and come back if it was the wrong one.

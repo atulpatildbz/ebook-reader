@@ -18,10 +18,14 @@ export type RelocateDetail = {
   fraction: number;
   location?: { current: number; next: number; total: number };
   section?: { current: number; total: number };
+  range?: Range;
   time?: { section: number; total: number };
   tocItem?: { label?: string; href?: string } | null;
   pageItem?: { label?: string } | null;
 };
+
+/** Where to go: a CFI or href, a section index, or a fraction of the whole book. */
+export type Target = string | number | { fraction: number };
 
 export interface FoliateView extends HTMLElement {
   book: FoliateBook;
@@ -33,9 +37,9 @@ export interface FoliateView extends HTMLElement {
     prev: () => Promise<void>;
   };
   open(file: File | Blob): Promise<void>;
-  init(opts: { lastLocation?: string | null; showTextStart?: boolean }): Promise<void>;
+  init(opts: { lastLocation?: Target | null; showTextStart?: boolean }): Promise<void>;
   close(): void;
-  goTo(target: string | number): Promise<unknown>;
+  goTo(target: Target): Promise<unknown>;
   goToFraction(f: number): Promise<void>;
   goLeft(): Promise<void>;
   goRight(): Promise<void>;

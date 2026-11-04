@@ -15,6 +15,7 @@ export const get = query({
     if (!row) return null;
     return {
       cfi: row.cfi,
+      xpointer: row.xpointer ?? null,
       fraction: row.fraction,
       chapter: row.chapter ?? null,
       device: row.device,
@@ -29,6 +30,7 @@ export const save = mutation({
   args: {
     bookId: v.id("books"),
     cfi: v.string(),
+    xpointer: v.optional(v.string()),
     fraction: v.number(),
     chapter: v.optional(v.string()),
     device: v.string(),
@@ -45,6 +47,7 @@ export const save = mutation({
       userId: user._id,
       bookId: args.bookId,
       cfi: args.cfi.slice(0, 2000),
+      xpointer: args.xpointer?.slice(0, 2000),
       fraction: Math.max(0, Math.min(1, args.fraction)),
       chapter: args.chapter?.slice(0, 300),
       device: args.device.slice(0, 64),

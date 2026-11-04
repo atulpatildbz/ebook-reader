@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { requireUser, allowedUser } from "./auth";
 import { format } from "./schema";
+import { internal } from "./_generated/api";
 
 const MAX_BOOK_BYTES = 300 * 1024 * 1024;
 const MAX_COVER_BYTES = 2 * 1024 * 1024;
@@ -133,7 +134,7 @@ export const create = mutation({
       await discard();
       return existing._id;
     }
-    return await ctx.db.insert("books", {
+    const bookId = await ctx.db.insert("books", {
       userId: user._id,
       title: args.title.trim().slice(0, 500) || args.fileName,
       author: args.author.trim().slice(0, 300),
@@ -145,6 +146,9 @@ export const create = mutation({
       sha256: args.sha256,
       addedAt: Date.now(),
     });
+    // Work out how e-readers name this book, so their reading position can be matched to it.
+    await ctx.scheduler.runAfter(0, internal.kosync.fingerprint, { bookId });
+    return bookId;
   },
 });
 

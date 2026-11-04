@@ -34,7 +34,7 @@ export async function download(url: string, onProgress: (f: number) => void): Pr
 
 // Local copy of the last position per book, so a page turn made offline is never lost and wins
 // over an older synced position next time.
-export type LocalProgress = { cfi: string; fraction: number; chapter?: string; updatedAt: number; pushed: boolean };
+export type LocalProgress = { cfi: string; xpointer?: string; fraction: number; chapter?: string; updatedAt: number; pushed: boolean };
 const pkey = (bookId: string) => `ribbon:pos:${bookId}`;
 
 export function getLocalProgress(bookId: string): LocalProgress | null {

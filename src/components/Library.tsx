@@ -8,6 +8,7 @@ import { dropCached, persistStorage } from "../lib/bookCache";
 import { openBook } from "../lib/route";
 import { setSettings, useTheme } from "../lib/settings";
 import { Moon, More, Plus, RibbonMark, Sun } from "./icons";
+import { ReaderSync } from "./ReaderSync";
 
 export type Book = NonNullable<ReturnType<typeof useQuery<typeof api.books.list>>>[number];
 type Me = { email: string; name: string; image: string | null };
@@ -153,8 +154,10 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
 function Account({ me }: { me: Me }) {
   const { signOut } = useAuthActions();
   const [open, setOpen] = useState(false);
+  const [sync, setSync] = useState(false);
   return (
     <div className="relative ml-1">
+      {sync && <ReaderSync onClose={() => setSync(false)} />}
       <button
         onClick={() => setOpen((o) => !o)}
         className="grid h-10 w-10 place-items-center overflow-hidden rounded-full border border-[var(--line)] bg-[var(--surface)] text-sm font-medium"
@@ -169,7 +172,16 @@ function Account({ me }: { me: Me }) {
           <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-lg">
             {me.name && <p className="font-medium">{me.name}</p>}
             <p className="truncate text-sm text-[var(--muted)]">{me.email}</p>
-            <button onClick={() => void signOut()} className="mt-4 w-full rounded-lg border border-[var(--line)] py-2 text-sm">
+            <button
+              onClick={() => {
+                setOpen(false);
+                setSync(true);
+              }}
+              className="mt-4 w-full rounded-lg border border-[var(--line)] py-2 text-sm"
+            >
+              E-reader sync
+            </button>
+            <button onClick={() => void signOut()} className="mt-2 w-full rounded-lg border border-[var(--line)] py-2 text-sm">
               Sign out
             </button>
           </div>

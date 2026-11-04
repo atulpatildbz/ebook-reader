@@ -39,7 +39,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
   },
 });
 
-async function emailAllowed(ctx: QueryCtx, email?: string) {
+export async function emailAllowed(ctx: QueryCtx, email?: string) {
   if (!email) return false;
   const row = await ctx.db
     .query("allowedEmails")
