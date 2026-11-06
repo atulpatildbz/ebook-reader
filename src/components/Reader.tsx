@@ -10,8 +10,8 @@ import { deviceId, deviceName } from "../lib/device";
 import { openLibrary } from "../lib/route";
 import { setSettings, useSettings, useTheme } from "../lib/settings";
 import { normalizeQuery, searchBook } from "../lib/search";
-import { Back, Close, Contents, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "./icons";
-import { ContentsPanel, SearchPanel, SettingsPanel, type SearchState } from "./ReaderPanels";
+import { Back, Close, Contents, Copy, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "./icons";
+import { ContentsPanel, CopyPanel, SearchPanel, SettingsPanel, type SearchState } from "./ReaderPanels";
 
 /** The synced position. From an e-reader it has no CFI, only a KOReader XPointer (see lib/xpointer). */
 export type Remote = { cfi: string; xpointer?: string | null; fraction: number; chapter: string | null; device: string; deviceName: string; updatedAt: number };
@@ -73,7 +73,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const [loc, setLoc] = useState<RelocateDetail | null>(null);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [chrome, setChrome] = useState(false);
-  const [panel, setPanel] = useState<"contents" | "settings" | "search" | null>(null);
+  const [panel, setPanel] = useState<"contents" | "settings" | "search" | "copy" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [offer, setOffer] = useState<Remote | null>(null);
   const [search, setSearch] = useState<SearchState>({ query: "", hits: [], progress: 0, running: false });
@@ -425,7 +425,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const chapter = loc?.tocItem?.label?.trim();
   const pageInfo = fixed && loc?.section ? `Page ${loc.section.current + 1} of ${loc.section.total}` : timeLeft(loc?.time?.section);
   const showChrome = chrome || panel !== null;
-  const canSearch = !!view?.book.sections.some((s) => (s as { createDocument?: unknown }).createDocument);
+  const hasText = !!view?.book.sections.some((s) => (s as { createDocument?: unknown }).createDocument);
 
   return (
     <div className="fixed inset-0 overflow-clip bg-[var(--bg)] select-none" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
@@ -488,9 +488,14 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
             <p className="truncate font-serif font-medium">{book?.title}</p>
             {book?.author && <p className="truncate text-xs text-[var(--muted)]">{book.author}</p>}
           </div>
-          {canSearch && (
+          {hasText && (
             <IconButton label="Find in book" onClick={() => setPanel(panel === "search" ? null : "search")} active={panel === "search"}>
               <Search />
+            </IconButton>
+          )}
+          {hasText && (
+            <IconButton label="Copy chapter" onClick={() => setPanel(panel === "copy" ? null : "copy")} active={panel === "copy"}>
+              <Copy />
             </IconButton>
           )}
           {toc.length > 0 && (
@@ -508,7 +513,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
       </header>
 
       <footer
-        className={`absolute inset-x-0 bottom-0 z-30 border-t border-[var(--line)] bg-[var(--surface)] transition-transform duration-200 ${showChrome && panel !== "settings" ? "translate-y-0" : "translate-y-full"}`}
+        className={`absolute inset-x-0 bottom-0 z-30 border-t border-[var(--line)] bg-[var(--surface)] transition-transform duration-200 ${showChrome && panel !== "settings" && panel !== "copy" ? "translate-y-0" : "translate-y-full"}`}
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="mx-auto max-w-3xl px-5 pt-3 pb-4">
@@ -535,6 +540,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
         />
       )}
       {panel === "settings" && <SettingsPanel fixed={fixed} onClose={() => setPanel(null)} />}
+      {panel === "copy" && view && (
+        <CopyPanel view={view} tocItem={loc?.tocItem} section={loc?.section?.current ?? 0} chapter={chapter} onClose={() => setPanel(null)} />
+      )}
       {panel === "search" && view && (
         <SearchPanel
           state={search}

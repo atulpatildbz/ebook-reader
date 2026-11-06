@@ -21,6 +21,8 @@ export type Settings = {
   /** Extra darkening over the page, 0–0.6 (for bright screens at night). */
   dim: number;
   pdfZoom: "fit-page" | "fit-width";
+  /** Words per part when copying a chapter in parts. */
+  copyPartWords: number;
 };
 
 export const DEFAULTS: Settings = {
@@ -39,6 +41,7 @@ export const DEFAULTS: Settings = {
   publisherColors: false,
   dim: 0,
   pdfZoom: "fit-page",
+  copyPartWords: 2000,
 };
 
 const KEY = "ribbon:settings";

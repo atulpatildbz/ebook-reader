@@ -31,3 +31,5 @@ export const Type = ({ className }: P) => (
 export const Search = (p: P) => <Stroke {...p} d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4.2-4.2" />;
 export const Prev = (p: P) => <Stroke {...p} d="M15 6l-6 6 6 6" />;
 export const Next = (p: P) => <Stroke {...p} d="M9 6l6 6-6 6" />;
+export const Copy = (p: P) => <Stroke {...p} d="M8 8h12v12H8zM16 8V4H4v12h4" />;
+export const Check = (p: P) => <Stroke {...p} d="M5 12.5l4.5 4.5L19 7.5" />;
