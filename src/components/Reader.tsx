@@ -87,6 +87,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const last = useRef<LocalProgress | null>(null);
   const pushedCfi = useRef<string | null>(null);
   const interactedAt = useRef(0);
+  const narratedAt = useRef(0); // narration last turned the page
   // While following another device's position ("Go there"), the pages shown are that device's
   // reading, not this one's: they are not saved back (which would prompt the other device).
   const following = useRef<{ until: number; updatedAt: number } | null>(null);
@@ -104,7 +105,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const mark = useRef<{ value: string; index: number } | null>(null); // the highlighted match
   const narrator = useRef<Narrator | null>(null);
   const [listening, setListening] = useState(false); // the read-aloud player is showing
-  const [narration, setNarration] = useState<NarrationState>({ status: "idle", engine: null, speed: null, stalls: 0, download: null, error: null });
+  const [playerHeight, setPlayerHeight] = useState(0);
+  const [reserved, setReserved] = useState(0); // px kept clear at the bottom of the page for the player
+  const [narration, setNarration] = useState<NarrationState>({ status: "idle", engine: null, speed: null, ahead: null, left: null, stalls: 0, download: null, error: null });
 
   // 1. Get the file: from this browser's cache, else download it once.
   const fileUrl = book?.fileUrl;
@@ -243,7 +246,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
         }
         following.current = null;
         // Only a move the reader made (not a resize reflowing the page) becomes the new position.
-        if (last.current && (!moved || Date.now() - interactedAt.current > 4000)) return;
+        if (last.current && (!moved || Date.now() - Math.max(interactedAt.current, narratedAt.current) > 4000)) return;
         last.current = { cfi: d.cfi, xpointer: xpointerOf(v, d), fraction: d.fraction, chapter: d.tocItem?.label?.trim(), updatedAt: Date.now(), pushed: false };
         setLocalProgress(bookId, last.current);
         setOffer(null);
@@ -343,7 +346,8 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
       lang,
       ribbon: themeRef.current.ribbon,
       onChange: setNarration,
-      onTurn: () => (interactedAt.current = Date.now()),
+      onTurn: () => (narratedAt.current = Date.now()),
+      userActive: () => Date.now() - interactedAt.current < 1500,
     });
     narrator.current = n;
     return () => {
@@ -361,6 +365,24 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     setPanel(null);
     void narrator.current?.play(settings.narrationVoice, settings.narrationRate);
   };
+
+  // Keep the page's text clear of the player: the book's area ends above it. Room is made at once
+  // when the player grows, and given back only once it has stayed smaller for a while, so a passing
+  // message doesn't reflow the page twice.
+  useEffect(() => {
+    const want = listening ? playerHeight : 0;
+    if (want >= reserved) {
+      if (want > reserved) setReserved(want);
+      return;
+    }
+    const t = window.setTimeout(() => setReserved(want), listening ? 4000 : 0);
+    return () => window.clearTimeout(t);
+  }, [listening, playerHeight, reserved]);
+  // The paginator already leaves PAGE_MARGIN below the text; the player sits BAR_OFFSET up from
+  // the bottom edge, and wants a little air above it.
+  const PAGE_MARGIN = 52;
+  const BAR_OFFSET = 4;
+  const bookBottom = reserved ? Math.max(0, reserved + BAR_OFFSET + 10 - PAGE_MARGIN) : 0;
 
   // 4. Another device read on while this one is open: offer to jump there.
   useEffect(() => {
@@ -459,7 +481,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
 
   const fixed = view?.isFixedLayout ?? false;
   const chapter = loc?.tocItem?.label?.trim();
-  const pageInfo = fixed && loc?.section ? `Page ${loc.section.current + 1} of ${loc.section.total}` : timeLeft(loc?.time?.section);
+  // While listening, time left is at the listening speed, from the sentence being read.
+  const listeningLeft = listening && narration.left !== null ? narration.left / settings.narrationRate / 60 : undefined;
+  const pageInfo = fixed && loc?.section ? `Page ${loc.section.current + 1} of ${loc.section.total}` : timeLeft(listeningLeft ?? loc?.time?.section);
   const showChrome = chrome || panel !== null;
   const hasText = !!view?.book.sections.some((s) => (s as { createDocument?: unknown }).createDocument);
 
@@ -469,7 +493,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
       <div
         ref={host}
         className="absolute inset-0"
-        style={{ top: "env(safe-area-inset-top)", bottom: "env(safe-area-inset-bottom)" }}
+        style={{ top: "env(safe-area-inset-top)", bottom: `calc(env(safe-area-inset-bottom) + ${bookBottom}px)` }}
         onClick={(e) => e.target === e.currentTarget.firstElementChild && tap(e.clientX)}
         onPointerDown={() => (interactedAt.current = Date.now())}
         onWheel={() => (interactedAt.current = Date.now())}
@@ -648,6 +672,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
             narrator.current?.stop();
             setListening(false);
           }}
+          onHeight={setPlayerHeight}
         />
       )}
 

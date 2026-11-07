@@ -12,6 +12,10 @@ export type NarrationState = {
   engine: "kokoro" | "device" | null;
   /** How many times faster than real time this device makes Kokoro speech (recent sentences). */
   speed: number | null;
+  /** Speech made ahead of what's playing, in seconds at normal pace (Kokoro only). */
+  ahead: { seconds: number; complete: boolean } | null;
+  /** Speech left in the section from the sentence being read, in seconds at normal pace. */
+  left: number | null;
   /** Times playback has waited for the next sentence since narration started. */
   stalls: number;
   /** The voice model download, while it's under way. */
@@ -55,7 +59,10 @@ export class Narrator {
   private voice = "af_heart";
   private rate = 1;
   private startedVoice = ""; // the voice the current playback was started with
-  private state: NarrationState = { status: "idle", engine: null, speed: null, stalls: 0, download: null, error: null };
+  private state: NarrationState = { status: "idle", engine: null, speed: null, ahead: null, left: null, stalls: 0, download: null, error: null };
+  // Characters per second of speech at normal pace: measured from Kokoro once it has spoken,
+  // until then a typical narration pace.
+  private cps = 14.5;
   private stallBase = 0; // the player's stall count when this narration started
   private lastStalls = 0;
   private turning = false; // a page turn or section change of our own is under way
@@ -73,6 +80,8 @@ export class Narrator {
       onChange: (s: NarrationState) => void;
       /** Called before narration turns the page, so the move counts as reading. */
       onTurn: () => void;
+      /** Whether the reader has just touched, scrolled or keyed (so a move is theirs, not a reflow). */
+      userActive: () => boolean;
     },
   ) {
     this.color = opts.ribbon;
@@ -89,7 +98,9 @@ export class Narrator {
   }
 
   private onRelocate = (e: Event) => {
-    if (this.turning || this.state.status === "idle") return;
+    // Our own turns, and relayouts nobody asked for (a resize, the player making room), aren't the
+    // reader moving away.
+    if (this.turning || this.state.status === "idle" || !this.opts.userActive()) return;
     const d = (e as CustomEvent<{ section?: { current: number } }>).detail;
     this.userMovedAt = Date.now();
     // Moved to another section: what's being read is no longer on screen anywhere nearby.
@@ -104,6 +115,8 @@ export class Narrator {
         this.set({ status: s, download: s === "loading" ? this.state.download : null });
       },
       onStats: (st: Stats) => {
+        if (st.charsPerSecond) this.cps = st.charsPerSecond;
+        if (st.ahead) this.set({ ahead: st.ahead });
         if (st.download && st.loadMs === undefined) this.set({ download: st.download });
         this.lastStalls = st.stalls.count;
         if (st.speed) this.set({ speed: st.speed.recent, stalls: st.stalls.count - this.stallBase });
@@ -118,7 +131,7 @@ export class Narrator {
         this.player = new BrowserPlayer(events);
       }
       (this.player as BrowserPlayer).lang = this.opts.lang.split("-")[0] || "en";
-      this.set({ engine: "device" });
+      this.set({ engine: "device", ahead: null });
     } else {
       if (!(this.player instanceof KokoroPlayer)) {
         this.player?.stop();
@@ -153,7 +166,7 @@ export class Narrator {
     const text = this.section?.text;
     if (!text) return;
     if (from >= text.pieces.length) return this.nextSection();
-    this.set({ status: "loading" });
+    this.set({ status: "loading", ahead: null, left: this.leftFrom(from) });
     this.sentence = from;
     this.startedVoice = this.voice;
     this.paintStyle(text.doc);
@@ -212,9 +225,19 @@ export class Narrator {
     await this.start(0);
   }
 
+  /** Seconds of speech at normal pace from piece `from` to the end of the section. */
+  private leftFrom(from: number): number | null {
+    const pieces = this.section?.text.pieces;
+    if (!pieces) return null;
+    let chars = 0;
+    for (let i = from; i < pieces.length; i++) chars += pieces[i].text.length;
+    return chars / this.cps;
+  }
+
   private onPosition(sentence: number, word: number) {
     const text = this.section?.text;
     if (!text || sentence >= text.pieces.length) return;
+    if (sentence !== this.sentence || this.state.left === null) this.set({ left: this.leftFrom(sentence) });
     this.sentence = sentence;
     const piece = text.pieces[sentence];
     const sentenceRange = text.range(sentence);
@@ -312,7 +335,7 @@ export class Narrator {
     this.player?.stop();
     this.clearHighlight();
     this.sentence = -1;
-    this.set({ status: "idle", download: null });
+    this.set({ status: "idle", download: null, ahead: null, left: null });
   }
 
   destroy() {

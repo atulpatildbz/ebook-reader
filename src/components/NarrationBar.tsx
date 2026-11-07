@@ -1,6 +1,8 @@
 // The player shown while the book is being read aloud: back/forward a sentence, play/pause,
 // speed and voice. Floats above the page; moves up out of the way of the reader's footer.
+import { useEffect, useRef } from "react";
 import type { NarrationState } from "../lib/narration/narrator";
+import { REBUFFER_SECONDS } from "../lib/narration/kokoroPlayer";
 import { DEVICE_VOICE } from "../lib/narration/narrator";
 import { Close, PauseIcon, PlayIcon, SkipBack, SkipForward } from "./icons";
 
@@ -23,6 +25,13 @@ export const VOICES: [id: string, name: string][] = [
 
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
 
+/** A stretch of listening: "45 s", "3 min", "1 h 20 min". */
+export function duration(seconds: number) {
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
+  const min = Math.round(seconds / 60);
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
 export function NarrationBar({
   state,
   voice,
@@ -33,6 +42,7 @@ export function NarrationBar({
   onRate,
   onVoice,
   onClose,
+  onHeight,
 }: {
   state: NarrationState;
   voice: string;
@@ -44,30 +54,58 @@ export function NarrationBar({
   onRate: (rate: number) => void;
   onVoice: (voice: string) => void;
   onClose: () => void;
+  /** The player's height in px, whenever it changes, so the page can end above it. */
+  onHeight: (px: number) => void;
 }) {
-  const { status, download, engine, error, speed, stalls } = state;
+  const root = useRef<HTMLDivElement>(null);
+  const heightRef = useRef(onHeight);
+  heightRef.current = onHeight;
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => heightRef.current(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const { status, download, engine, error, speed, stalls, ahead, left } = state;
   const playing = status === "playing";
   let note = "";
   if (status === "loading" && download && download.total) {
     note = `Downloading the voice, once: ${Math.round((download.loaded / download.total) * 100)}% of ${Math.round(download.total / 1e6)} MB`;
   } else if (status === "loading") note = "Starting…";
   else if (engine === "device" && voice !== DEVICE_VOICE) note = "Using this device's voice: natural voices need a browser with WebGPU, and English";
-  if (engine === "kokoro" && speed !== null && speed < rate && (stalls > 0 || status === "loading")) {
+  const slow = engine === "kokoro" && speed !== null && speed < rate;
+  if (slow && (stalls > 0 || status === "loading")) {
     // The fastest listed speed this device can keep up with, with a little to spare.
     const ok = RATES.filter((r) => r <= speed * 0.9).at(-1);
-    const why = `This device makes speech at ${speed.toFixed(1)}× real time, so at ${rate}× it stops now and then to get ahead.`;
-    const fix = ok ? ` ${ok}× or slower plays without stops.` : "";
-    note = status === "loading" ? `Getting ahead… ${why}${fix}` : `${why}${fix}`;
+    note = `This device makes speech at ${speed.toFixed(1)}× real time, so at ${rate}× it stops now and then to get ahead.${ok ? ` ${ok}× or slower plays without stops.` : ""}`;
   }
   if (error) note = `Narration stopped: ${error}`;
+
+  // Where listening stands: time left in the chapter at this speed, and how much is made ahead.
+  const parts: string[] = [];
+  const gettingAhead = status === "loading" && ahead !== null && (stalls > 0 || slow);
+  if (gettingAhead) {
+    parts.push(`Getting ahead: ${duration(ahead.seconds / rate)} of ${REBUFFER_SECONDS} s ready`);
+  } else if (status !== "loading" || !download) {
+    if (left !== null) parts.push(`${duration(left / rate)} left in chapter at ${rate}×`);
+    if (ahead !== null && engine === "kokoro") parts.push(ahead.complete ? "rest of chapter ready" : `${duration(ahead.seconds / rate)} ready ahead`);
+  }
+  const progress = parts.join(" · ");
 
   const select = "h-8 rounded-full border border-[var(--line)] bg-transparent px-2.5 text-sm text-[var(--fg)]";
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 z-30 flex flex-col items-center gap-2 px-3 transition-[bottom] duration-200"
+      ref={root}
+      className="pointer-events-none absolute inset-x-0 z-30 flex flex-col items-center gap-1.5 px-3 transition-[bottom] duration-200"
       style={{ bottom: raised ? "calc(env(safe-area-inset-bottom) + 118px)" : "calc(env(safe-area-inset-bottom) + 4px)" }}
     >
-      {note && <p className="pointer-events-auto max-w-md rounded-full bg-[var(--surface)] px-3 py-1 text-center text-xs text-[var(--muted)] shadow">{note}</p>}
+      {note && <p className="pointer-events-auto max-w-md rounded-2xl bg-[var(--surface)] px-3 py-1 text-center text-xs text-[var(--muted)] shadow">{note}</p>}
+      {progress && (
+        <p className="pointer-events-auto max-w-md rounded-full bg-[var(--surface)] px-3 py-1 text-center text-xs text-[var(--muted)] tabular-nums shadow" aria-live="off">
+          {progress}
+        </p>
+      )}
       <div
         role="region"
         aria-label="Read aloud"

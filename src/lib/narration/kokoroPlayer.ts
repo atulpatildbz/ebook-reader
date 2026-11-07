@@ -17,6 +17,13 @@ export type Stats = {
   speed?: { last: number; avg: number; recent: number };
   /** Times playback had to wait for synthesis, and the total wait. */
   stalls: { count: number; seconds: number };
+  /**
+   * Speech made and waiting to be played, in seconds at normal pace; `complete` once everything
+   * to the end of what's being read is made.
+   */
+  ahead?: { seconds: number; complete: boolean };
+  /** Characters of text per second of speech at normal pace, as this voice actually speaks. */
+  charsPerSecond?: number;
 };
 
 export type Events = {
@@ -48,7 +55,7 @@ const AHEAD_SECONDS = 300;
 // Sentences with the worker at once: one being made and one waiting, so it never sits idle.
 const IN_FLIGHT = 2;
 // After running out, wait until this much listening time is ready before carrying on.
-const REBUFFER_SECONDS = 20;
+export const REBUFFER_SECONDS = 20;
 const PARAGRAPH_PAUSE = 0.35;
 
 /**
@@ -91,7 +98,7 @@ export class KokoroPlayer implements Player {
   private onReady = () => {};
   readonly audio = new Audio();
   private stats: Stats = { stalls: { count: 0, seconds: 0 } };
-  private totals = { audio: 0, gen: 0 };
+  private totals = { audio: 0, gen: 0, chars: 0 };
   private recent: { audio: number; gen: number }[] = [];
 
   // One play() run; results from an earlier run are dropped.
@@ -154,11 +161,14 @@ export class KokoroPlayer implements Player {
       const gen = msg.genMs / 1000;
       this.totals.audio += spoken;
       this.totals.gen += gen;
+      if (req) this.totals.chars += this.sentences[req.index]?.text.length ?? 0;
+      if (req && this.totals.chars) this.setStats({ charsPerSecond: this.totals.chars / this.totals.audio });
       this.recent = [...this.recent.slice(-5), { audio: spoken, gen }];
       const sum = (k: "audio" | "gen") => this.recent.reduce((a, r) => a + r[k], 0);
       this.setStats({ speed: { last: spoken / gen, avg: this.totals.audio / this.totals.gen, recent: sum("audio") / sum("gen") } });
       if (!req || req.run !== this.run) return;
       this.results.set(req.index, { blob: wav(msg.samples, msg.sampleRate), seconds, pace, words: msg.words });
+      this.reportAhead();
       this.request();
       if (this.waitingSince !== null) this.tryResume();
     }
@@ -192,6 +202,13 @@ export class KokoroPlayer implements Player {
   setRate(rate: number) {
     this.rate = rate;
     this.audio.playbackRate = rate / this.pace;
+  }
+
+  private reportAhead() {
+    let seconds = 0;
+    for (const r of this.results.values()) seconds += r.seconds * r.pace;
+    const complete = this.requested >= this.sentences.length && this.requests.size === 0;
+    this.setStats({ ahead: { seconds, complete } });
   }
 
   /** Keep the worker busy until AHEAD_SECONDS of speech is ready beyond the sentence playing. */
@@ -247,6 +264,7 @@ export class KokoroPlayer implements Player {
     this.waitingSince = null;
     this.rebuffering = false;
     this.results.delete(next);
+    this.reportAhead();
     this.current = next;
     this.words = r.words;
     this.shownWord = -1;
