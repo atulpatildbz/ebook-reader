@@ -104,7 +104,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const mark = useRef<{ value: string; index: number } | null>(null); // the highlighted match
   const narrator = useRef<Narrator | null>(null);
   const [listening, setListening] = useState(false); // the read-aloud player is showing
-  const [narration, setNarration] = useState<NarrationState>({ status: "idle", engine: null, download: null, error: null });
+  const [narration, setNarration] = useState<NarrationState>({ status: "idle", engine: null, speed: null, stalls: 0, download: null, error: null });
 
   // 1. Get the file: from this browser's cache, else download it once.
   const fileUrl = book?.fileUrl;

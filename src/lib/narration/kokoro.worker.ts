@@ -7,8 +7,9 @@ import { alignWords, type WordTiming } from "./align";
 const MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped";
 
 export type Device = "webgpu" | "wasm";
+export type Dtype = "fp32" | "fp16" | "q8";
 export type ToWorker =
-  | { type: "load"; device: Device }
+  | { type: "load"; device: Device; dtype?: Dtype }
   | { type: "speak"; id: number; text: string; voice: string; speed: number }
   /** Drop queued sentences with an id below this; they were for playback that's been stopped. */
   | { type: "cancel"; below: number };
@@ -26,10 +27,10 @@ let last: { ids: Tensor; durations: Tensor } | null = null;
 let queue = Promise.resolve();
 let cancelBelow = 0;
 
-async function load(device: Device) {
+async function load(device: Device, wanted?: Dtype) {
   const t = performance.now();
   // fp32 on the GPU (the quantized models are slow or wrong there); 8-bit on the CPU.
-  const dtype = device === "webgpu" ? "fp32" : "q8";
+  const dtype = wanted ?? (device === "webgpu" ? "fp32" : "q8");
   const files = new Map<string, { loaded: number; total: number }>();
   tts = await KokoroTTS.from_pretrained(MODEL, {
     dtype,
@@ -74,6 +75,6 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     return;
   }
   queue = queue
-    .then(() => (msg.type === "load" ? load(msg.device) : speak(msg)))
+    .then(() => (msg.type === "load" ? load(msg.device, msg.dtype) : speak(msg)))
     .catch((err) => post({ type: "error", id: msg.type === "speak" ? msg.id : undefined, message: String(err?.message ?? err) }));
 };

@@ -1,5 +1,5 @@
-// Dev-only: try narration voices on any text, with sentence and word highlighting.
-// http://localhost:5173/?harness=narration
+// Try narration voices on any text, with sentence and word highlighting, and see how fast this
+// device makes speech. No sign-in: http://localhost:5173/?harness=narration (also on the live site).
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApplyTheme, useTheme } from "../lib/settings";
 import { KokoroPlayer, type Stats } from "../lib/narration/kokoroPlayer";
@@ -50,7 +50,7 @@ const KOKORO_VOICES = [
   ["bm_fable", "Fable · UK man · C"],
 ] as const;
 
-type Engine = "webgpu" | "wasm" | "browser";
+type Engine = "webgpu" | "webgpu-fp16" | "wasm" | "browser";
 type State = "loading" | "playing" | "paused" | "idle";
 
 const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
@@ -101,7 +101,7 @@ export function NarrationHarness() {
   );
   const player = (e: Engine) => {
     let p = players.current.get(e);
-    if (!p) players.current.set(e, (p = e === "browser" ? new BrowserPlayer(events) : new KokoroPlayer(e, events)));
+    if (!p) players.current.set(e, (p = e === "browser" ? new BrowserPlayer(events) : e === "webgpu-fp16" ? new KokoroPlayer("webgpu", events, "fp16") : new KokoroPlayer(e, events)));
     return p;
   };
   useEffect(() => () => players.current.forEach((p) => p.dispose()), []);
@@ -178,6 +178,9 @@ export function NarrationHarness() {
           <select className={field} value={engine} onChange={(e) => setEngine(e.target.value as Engine)}>
             <option value="webgpu" disabled={!hasWebGPU}>
               Kokoro · GPU{hasWebGPU ? "" : " (not available)"}
+            </option>
+            <option value="webgpu-fp16" disabled={!hasWebGPU}>
+              Kokoro · GPU, half precision
             </option>
             <option value="wasm">Kokoro · CPU</option>
             <option value="browser">Built-in voice</option>

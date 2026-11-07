@@ -45,13 +45,18 @@ export function NarrationBar({
   onVoice: (voice: string) => void;
   onClose: () => void;
 }) {
-  const { status, download, engine, error } = state;
+  const { status, download, engine, error, speed, stalls } = state;
   const playing = status === "playing";
   let note = "";
   if (status === "loading" && download && download.total) {
     note = `Downloading the voice, once: ${Math.round((download.loaded / download.total) * 100)}% of ${Math.round(download.total / 1e6)} MB`;
   } else if (status === "loading") note = "Starting…";
   else if (engine === "device" && voice !== DEVICE_VOICE) note = "Using this device's voice: natural voices need a browser with WebGPU, and English";
+  else if (engine === "kokoro" && stalls >= 2 && speed !== null && speed < rate) {
+    // The fastest listed speed this device can keep up with, with a little to spare.
+    const ok = RATES.filter((r) => r <= speed * 0.9).at(-1);
+    note = `Pausing because this device makes speech at ${speed.toFixed(1)}× real time. ${ok ? `${ok}× or slower should play smoothly.` : "That's too slow to play smoothly here."}`;
+  }
   if (error) note = `Narration stopped: ${error}`;
 
   const select = "h-8 rounded-full border border-[var(--line)] bg-transparent px-2.5 text-sm text-[var(--fg)]";

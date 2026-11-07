@@ -5,15 +5,15 @@
 // playback by the browser, which keeps the pitch. So the speed can change instantly mid-sentence,
 // and fast listening only needs synthesis to run faster than the chosen speed.
 import type { WordTiming } from "./align";
-import type { Device, FromWorker, ToWorker } from "./kokoro.worker";
+import type { Device, Dtype, FromWorker, ToWorker } from "./kokoro.worker";
 
 export type Stats = {
   device?: Device;
   dtype?: string;
   loadMs?: number;
   download?: { loaded: number; total: number };
-  /** Seconds of audio per second of synthesis, for the latest sentence and on average. */
-  speed?: { last: number; avg: number };
+  /** Seconds of audio per second of synthesis: the latest sentence, all of them, and the last few. */
+  speed?: { last: number; avg: number; recent: number };
   /** Times playback had to wait for synthesis, and the total wait. */
   stalls: { count: number; seconds: number };
 };
@@ -79,6 +79,7 @@ export class KokoroPlayer implements Player {
   readonly audio = new Audio();
   private stats: Stats = { stalls: { count: 0, seconds: 0 } };
   private totals = { audio: 0, gen: 0 };
+  private recent: { audio: number; gen: number }[] = [];
 
   // One play() run; results from an earlier run are dropped.
   private run = 0;
@@ -101,6 +102,7 @@ export class KokoroPlayer implements Player {
   constructor(
     private device: Device,
     public events: Events,
+    private dtype?: Dtype,
   ) {
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
     this.audio.preservesPitch = true;
@@ -114,7 +116,7 @@ export class KokoroPlayer implements Player {
   private load() {
     this.ready ??= new Promise<void>((resolve) => {
       this.onReady = resolve;
-      this.send({ type: "load", device: this.device });
+      this.send({ type: "load", device: this.device, dtype: this.dtype });
     });
     return this.ready;
   }
@@ -133,7 +135,9 @@ export class KokoroPlayer implements Player {
       const seconds = msg.samples.length / msg.sampleRate;
       this.totals.audio += seconds;
       this.totals.gen += msg.genMs / 1000;
-      this.setStats({ speed: { last: seconds / (msg.genMs / 1000), avg: this.totals.audio / this.totals.gen } });
+      this.recent = [...this.recent.slice(-5), { audio: seconds, gen: msg.genMs / 1000 }];
+      const sum = (k: "audio" | "gen") => this.recent.reduce((a, r) => a + r[k], 0);
+      this.setStats({ speed: { last: seconds / (msg.genMs / 1000), avg: this.totals.audio / this.totals.gen, recent: sum("audio") / sum("gen") } });
       if (!req || req.run !== this.run) return;
       this.results.set(req.index, msg);
       if (this.waitingSince !== null && req.index === this.current + 1) this.advance();

@@ -7,14 +7,15 @@ import "./index.css";
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
-const harness = import.meta.env.DEV ? new URLSearchParams(location.search).get("harness") : null;
+const harness = new URLSearchParams(location.search).get("harness");
 
 const root = createRoot(document.getElementById("root")!);
 
 if (import.meta.env.DEV && harness?.startsWith("library")) {
   const { LibraryHarness } = await import("./dev/LibraryHarness");
   root.render(<LibraryHarness empty={harness === "library-empty"} />);
-} else if (import.meta.env.DEV && harness === "narration") {
+} else if (harness === "narration") {
+  // Also on the live site: for trying voices and measuring a device's speed, no sign-in needed.
   const { NarrationHarness } = await import("./dev/NarrationHarness");
   root.render(<NarrationHarness />);
 } else if (import.meta.env.DEV && harness) {

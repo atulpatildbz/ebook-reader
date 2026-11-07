@@ -10,6 +10,10 @@ export type NarrationStatus = "idle" | "loading" | "playing" | "paused";
 export type NarrationState = {
   status: NarrationStatus;
   engine: "kokoro" | "device" | null;
+  /** How many times faster than real time this device makes Kokoro speech (recent sentences). */
+  speed: number | null;
+  /** Times playback has waited for the next sentence since narration started. */
+  stalls: number;
   /** The voice model download, while it's under way. */
   download: { loaded: number; total: number } | null;
   error: string | null;
@@ -51,7 +55,9 @@ export class Narrator {
   private voice = "af_heart";
   private rate = 1;
   private startedVoice = ""; // the voice the current playback was started with
-  private state: NarrationState = { status: "idle", engine: null, download: null, error: null };
+  private state: NarrationState = { status: "idle", engine: null, speed: null, stalls: 0, download: null, error: null };
+  private stallBase = 0; // the player's stall count when this narration started
+  private lastStalls = 0;
   private turning = false; // a page turn or section change of our own is under way
   private userMovedAt = 0;
   private color: string;
@@ -99,6 +105,8 @@ export class Narrator {
       },
       onStats: (st: Stats) => {
         if (st.download && st.loadMs === undefined) this.set({ download: st.download });
+        this.lastStalls = st.stalls.count;
+        if (st.speed) this.set({ speed: st.speed.recent, stalls: st.stalls.count - this.stallBase });
       },
       onError: (m: string) => this.set({ error: m }),
       onEnd: () => void this.nextSection(),
@@ -127,7 +135,8 @@ export class Narrator {
   async play(voice: string, rate: number) {
     this.voice = voice;
     this.rate = rate;
-    this.set({ error: null });
+    this.stallBase = this.lastStalls;
+    this.set({ error: null, stalls: 0 });
     // Paused with the sentence still on screen: carry on from it.
     if (this.state.status === "paused" && this.player && this.onScreen()) {
       if (this.voice === this.startedVoice) this.player.resume();
@@ -285,6 +294,8 @@ export class Narrator {
 
   setRate(rate: number) {
     this.rate = rate;
+    this.stallBase = this.lastStalls;
+    this.set({ stalls: 0 });
     this.player?.setRate(rate);
   }
 
