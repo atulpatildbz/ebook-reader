@@ -52,10 +52,12 @@ export function NarrationBar({
     note = `Downloading the voice, once: ${Math.round((download.loaded / download.total) * 100)}% of ${Math.round(download.total / 1e6)} MB`;
   } else if (status === "loading") note = "Starting…";
   else if (engine === "device" && voice !== DEVICE_VOICE) note = "Using this device's voice: natural voices need a browser with WebGPU, and English";
-  else if (engine === "kokoro" && stalls >= 2 && speed !== null && speed < rate) {
+  if (engine === "kokoro" && speed !== null && speed < rate && (stalls > 0 || status === "loading")) {
     // The fastest listed speed this device can keep up with, with a little to spare.
     const ok = RATES.filter((r) => r <= speed * 0.9).at(-1);
-    note = `Pausing because this device makes speech at ${speed.toFixed(1)}× real time. ${ok ? `${ok}× or slower should play smoothly.` : "That's too slow to play smoothly here."}`;
+    const why = `This device makes speech at ${speed.toFixed(1)}× real time, so at ${rate}× it stops now and then to get ahead.`;
+    const fix = ok ? ` ${ok}× or slower plays without stops.` : "";
+    note = status === "loading" ? `Getting ahead… ${why}${fix}` : `${why}${fix}`;
   }
   if (error) note = `Narration stopped: ${error}`;
 

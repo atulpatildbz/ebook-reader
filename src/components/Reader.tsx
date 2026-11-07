@@ -632,8 +632,8 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
           onToggle={() => {
             const n = narrator.current;
             if (!n) return;
-            if (narration.status === "playing") n.pause();
-            else if (narration.status !== "loading") void n.play(settings.narrationVoice, settings.narrationRate);
+            if (narration.status === "playing" || narration.status === "loading") n.pause();
+            else void n.play(settings.narrationVoice, settings.narrationRate);
           }}
           onSkip={(d) => narrator.current?.skip(d)}
           onRate={(r) => {
