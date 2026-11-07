@@ -13,7 +13,7 @@ export type Stats = {
   dtype?: string;
   loadMs?: number;
   download?: { loaded: number; total: number };
-  /** Seconds of audio per second of synthesis: the latest sentence, all of them, and the last few. */
+  /** Seconds of audio per second of synthesis: the latest sentence, all of them, and the last two minutes' worth. */
   speed?: { last: number; avg: number; recent: number };
   /** Times playback had to wait for synthesis, and the total wait. */
   stalls: { count: number; seconds: number };
@@ -163,9 +163,14 @@ export class KokoroPlayer implements Player {
       this.totals.gen += gen;
       if (req) this.totals.chars += this.sentences[req.index]?.text.length ?? 0;
       if (req && this.totals.chars) this.setStats({ charsPerSecond: this.totals.chars / this.totals.audio });
-      this.recent = [...this.recent.slice(-5), { audio: spoken, gen }];
+      // "Recent" speed: over about the last two minutes of speech, so it holds steady from one
+      // sentence to the next (short ones carry more fixed overhead) yet follows real changes.
+      // The model's first sentence is slow while the GPU warms up: not counted.
+      if (this.totals.audio > spoken || this.recent.length) this.recent.push({ audio: spoken, gen });
+      while (this.recent.length > 1 && this.recent.reduce((a, r) => a + r.audio, 0) - this.recent[0].audio >= 120) this.recent.shift();
       const sum = (k: "audio" | "gen") => this.recent.reduce((a, r) => a + r[k], 0);
-      this.setStats({ speed: { last: spoken / gen, avg: this.totals.audio / this.totals.gen, recent: sum("audio") / sum("gen") } });
+      const recent = this.recent.length ? sum("audio") / sum("gen") : spoken / gen;
+      this.setStats({ speed: { last: spoken / gen, avg: this.totals.audio / this.totals.gen, recent } });
       if (!req || req.run !== this.run) return;
       this.results.set(req.index, { blob: wav(msg.samples, msg.sampleRate), seconds, pace, words: msg.words });
       this.reportAhead();
