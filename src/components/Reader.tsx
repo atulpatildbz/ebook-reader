@@ -3,15 +3,17 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { download, getCached, getLocalProgress, putCached, setLocalProgress, type LocalProgress } from "../lib/bookCache";
-import { loadFoliate, type FoliateView, type RelocateDetail, type Target, type TocItem } from "../lib/foliate";
+import { loadFoliate, text, type FoliateView, type RelocateDetail, type Target, type TocItem } from "../lib/foliate";
 import { toXPointer, xpointerToCFI } from "../lib/xpointer";
 import { applyToView } from "../lib/bookStyles";
 import { deviceId, deviceName } from "../lib/device";
 import { openLibrary } from "../lib/route";
 import { setSettings, useSettings, useTheme } from "../lib/settings";
 import { normalizeQuery, searchBook } from "../lib/search";
-import { Back, Close, Contents, Copy, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "./icons";
+import { Back, Close, Contents, Copy, Headphones, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "./icons";
 import { ContentsPanel, CopyPanel, SearchPanel, SettingsPanel, type SearchState } from "./ReaderPanels";
+import { Narrator, type NarrationState } from "../lib/narration/narrator";
+import { NarrationBar } from "./NarrationBar";
 
 /** The synced position. From an e-reader it has no CFI, only a KOReader XPointer (see lib/xpointer). */
 export type Remote = { cfi: string; xpointer?: string | null; fraction: number; chapter: string | null; device: string; deviceName: string; updatedAt: number };
@@ -100,6 +102,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const searchAbort = useRef<AbortController | null>(null);
   const returnTo = useRef<string | null>(null); // where the reader was before jumping to a match
   const mark = useRef<{ value: string; index: number } | null>(null); // the highlighted match
+  const narrator = useRef<Narrator | null>(null);
+  const [listening, setListening] = useState(false); // the read-aloud player is showing
+  const [narration, setNarration] = useState<NarrationState>({ status: "idle", engine: null, download: null, error: null });
 
   // 1. Get the file: from this browser's cache, else download it once.
   const fileUrl = book?.fileUrl;
@@ -326,6 +331,37 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     if (view) applyToView(view, settings, theme);
   }, [view, settings, theme]);
 
+  // Reading aloud. Narration turns pages as it goes, which counts as reading: the position syncs.
+  const bookTitle = book?.title ?? "";
+  const bookAuthor = book?.author ?? "";
+  useEffect(() => {
+    if (!view) return;
+    const lang = text(view.book.metadata?.language) || "en";
+    const n = new Narrator(view, {
+      title: bookTitle,
+      author: bookAuthor,
+      lang,
+      ribbon: themeRef.current.ribbon,
+      onChange: setNarration,
+      onTurn: () => (interactedAt.current = Date.now()),
+    });
+    narrator.current = n;
+    return () => {
+      n.destroy();
+      narrator.current = null;
+      setListening(false);
+    };
+  }, [view, bookTitle, bookAuthor]);
+
+  useEffect(() => narrator.current?.setColor(theme.ribbon), [theme.ribbon, view]);
+
+  const listen = () => {
+    setListening(true);
+    setChrome(false);
+    setPanel(null);
+    void narrator.current?.play(settings.narrationVoice, settings.narrationRate);
+  };
+
   // 4. Another device read on while this one is open: offer to jump there.
   useEffect(() => {
     if (!remote || !view || remote.device === deviceId) return;
@@ -466,7 +502,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
             {fixed ? "" : chapter}
           </div>
           <div
-            className={`pointer-events-none absolute inset-x-0 z-20 flex justify-between px-6 text-xs text-[var(--muted)] tabular-nums transition-opacity sm:px-10 ${showChrome ? "opacity-0" : "opacity-100"}`}
+            className={`pointer-events-none absolute inset-x-0 z-20 flex justify-between px-6 text-xs text-[var(--muted)] tabular-nums transition-opacity sm:px-10 ${showChrome || listening ? "opacity-0" : "opacity-100"}`}
             style={{ bottom: "calc(env(safe-area-inset-bottom) + 16px)" }}
           >
             <span>{loc ? pct(loc.fraction) : ""}</span>
@@ -488,6 +524,11 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
             <p className="truncate font-serif font-medium">{book?.title}</p>
             {book?.author && <p className="truncate text-xs text-[var(--muted)]">{book.author}</p>}
           </div>
+          {hasText && !fixed && (
+            <IconButton label="Read aloud" onClick={listen} active={listening}>
+              <Headphones />
+            </IconButton>
+          )}
           {hasText && (
             <IconButton label="Find in book" onClick={() => setPanel(panel === "search" ? null : "search")} active={panel === "search"}>
               <Search />
@@ -580,6 +621,34 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
             </IconButton>
           </div>
         </div>
+      )}
+
+      {listening && (
+        <NarrationBar
+          state={narration}
+          voice={settings.narrationVoice}
+          rate={settings.narrationRate}
+          raised={showChrome && panel === null}
+          onToggle={() => {
+            const n = narrator.current;
+            if (!n) return;
+            if (narration.status === "playing") n.pause();
+            else if (narration.status !== "loading") void n.play(settings.narrationVoice, settings.narrationRate);
+          }}
+          onSkip={(d) => narrator.current?.skip(d)}
+          onRate={(r) => {
+            setSettings({ narrationRate: r });
+            narrator.current?.setRate(r);
+          }}
+          onVoice={(v) => {
+            setSettings({ narrationVoice: v });
+            narrator.current?.setVoice(v);
+          }}
+          onClose={() => {
+            narrator.current?.stop();
+            setListening(false);
+          }}
+        />
       )}
 
       {/* Sync messages. */}

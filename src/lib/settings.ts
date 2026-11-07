@@ -23,6 +23,10 @@ export type Settings = {
   pdfZoom: "fit-page" | "fit-width";
   /** Words per part when copying a chapter in parts. */
   copyPartWords: number;
+  /** Narration voice: a Kokoro voice id, or "device" for the system's own. */
+  narrationVoice: string;
+  /** Narration speed, 0.75–3. */
+  narrationRate: number;
 };
 
 export const DEFAULTS: Settings = {
@@ -42,6 +46,8 @@ export const DEFAULTS: Settings = {
   dim: 0,
   pdfZoom: "fit-page",
   copyPartWords: 2000,
+  narrationVoice: "af_heart",
+  narrationRate: 1,
 };
 
 const KEY = "ribbon:settings";

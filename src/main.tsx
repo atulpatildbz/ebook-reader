@@ -14,6 +14,9 @@ const root = createRoot(document.getElementById("root")!);
 if (import.meta.env.DEV && harness?.startsWith("library")) {
   const { LibraryHarness } = await import("./dev/LibraryHarness");
   root.render(<LibraryHarness empty={harness === "library-empty"} />);
+} else if (import.meta.env.DEV && harness === "narration") {
+  const { NarrationHarness } = await import("./dev/NarrationHarness");
+  root.render(<NarrationHarness />);
 } else if (import.meta.env.DEV && harness) {
   const { Harness } = await import("./dev/Harness");
   root.render(<Harness name={harness} />);

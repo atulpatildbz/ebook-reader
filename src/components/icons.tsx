@@ -33,3 +33,19 @@ export const Prev = (p: P) => <Stroke {...p} d="M15 6l-6 6 6 6" />;
 export const Next = (p: P) => <Stroke {...p} d="M9 6l6 6-6 6" />;
 export const Copy = (p: P) => <Stroke {...p} d="M8 8h12v12H8zM16 8V4H4v12h4" />;
 export const Check = (p: P) => <Stroke {...p} d="M5 12.5l4.5 4.5L19 7.5" />;
+export const Headphones = (p: P) => (
+  <Stroke {...p} d="M4 15v-3a8 8 0 0 1 16 0v3M4 15a2 2 0 0 1 2-2h1v7H6a2 2 0 0 1-2-2zM20 15a2 2 0 0 0-2-2h-1v7h1a2 2 0 0 0 2-2z" />
+);
+export const SkipBack = (p: P) => <Stroke {...p} d="M12 7l-5 5 5 5M18 7l-5 5 5 5" />;
+export const SkipForward = (p: P) => <Stroke {...p} d="M12 7l5 5-5 5M6 7l5 5-5 5" />;
+export const PlayIcon = ({ className }: P) => (
+  <svg viewBox="0 0 24 24" className={className ?? "h-5 w-5"} aria-hidden fill="currentColor">
+    <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" />
+  </svg>
+);
+export const PauseIcon = ({ className }: P) => (
+  <svg viewBox="0 0 24 24" className={className ?? "h-5 w-5"} aria-hidden fill="currentColor">
+    <rect x="6.5" y="5" width="4" height="14" rx="1" />
+    <rect x="13.5" y="5" width="4" height="14" rx="1" />
+  </svg>
+);
