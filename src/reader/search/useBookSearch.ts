@@ -49,12 +49,18 @@ export function useBookSearch(
 
   useEffect(() => () => abort.current?.abort(), []);
 
+  const unmark = useCallback(() => {
+    if (mark.current && view) void view.deleteAnnotation({ value: mark.current.value });
+    mark.current = null;
+  }, [view]);
+
   const run = useCallback(
     (query: string) => {
       abort.current?.abort();
       const ctrl = new AbortController();
       abort.current = ctrl;
       setActive(null);
+      unmark(); // nothing else can clear it once no match is active
       const enough = normalizeQuery(query).length >= 2;
       setState({ query, hits: [], progress: 0, running: enough });
       if (!view || !enough) return;
@@ -66,13 +72,8 @@ export function useBookSearch(
         .catch((e) => console.error("Search failed", e))
         .finally(() => !ctrl.signal.aborted && setState((s) => ({ ...s, running: false, progress: 1 })));
     },
-    [view],
+    [view, unmark],
   );
-
-  const unmark = () => {
-    if (mark.current && view) void view.deleteAnnotation({ value: mark.current.value });
-    mark.current = null;
-  };
 
   const show = async (i: number) => {
     const hit = state.hits[i];

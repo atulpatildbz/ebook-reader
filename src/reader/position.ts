@@ -1,6 +1,8 @@
 // Where the reader is in the book, kept in step across devices. Each move the reader makes is saved
 // in this browser at once and pushed to Convex 1.5 s after the page settles, and when the tab is
 // hidden or closed. Moves the reader didn't make, like a resize reflowing the text, are not saved.
+// Times are on the server's clock as near as this device can tell, so a device whose clock is
+// wrong doesn't lose out to the others (or beat them).
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -10,7 +12,9 @@ import { toXPointer, xpointerToCFI } from "./xpointer";
 
 /** The synced position. From an e-reader it has no CFI (`""`), only a KOReader XPointer. */
 export type Remote = NonNullable<FunctionReturnType<typeof api.progress.get>>;
-export type SavePosition = (p: FunctionArgs<typeof api.progress.save>) => Promise<unknown>;
+export type SavePosition = (p: FunctionArgs<typeof api.progress.save>) => Promise<FunctionReturnType<typeof api.progress.save>>;
+/** Asks the server for the synced position now; resolves once it has answered. */
+export type FreshPosition = () => Promise<Remote | null>;
 
 /** This browser's copy of the last position, so a page turn made offline is never lost. */
 type Local = { cfi: string; xpointer?: string; fraction: number; chapter?: string; updatedAt: number; pushed: boolean };
@@ -34,6 +38,20 @@ function writeLocal(bookId: string, p: Local) {
   }
 }
 
+const CLOCK = "ribbon:clock-offset";
+
+/** How far this device's clock is behind the server's, in ms, as last measured. */
+function clockOffset() {
+  try {
+    return Number(localStorage.getItem(CLOCK)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The time now, on the server's clock. */
+const now = () => Date.now() + clockOffset();
+
 /** Where a synced position is in this book: its CFI, else the e-reader's XPointer, else the percentage. */
 async function placeOf(view: FoliateView, r: Remote): Promise<Target> {
   if (r.cfi) return r.cfi;
@@ -54,6 +72,12 @@ function xpointerOf(view: FoliateView, d: RelocateDetail) {
 const OWN_MOVE_MS = 4000;
 /** After "Go there", page moves this long are the other device's position settling in. */
 const FOLLOW_MS = 2000;
+/** Away this long (tab hidden, computer asleep) and what this tab knows may be out of date. */
+const AWAY_MS = 60_000;
+/** Pages turned this soon after coming back may be turned on an out-of-date view of the book. */
+const JUST_BACK_MS = 120_000;
+/** A round trip longer than this says too little about the server's clock (the request sat queued). */
+const CLOCK_ROUND_TRIP_MS = 5000;
 
 export class Position {
   private last: Local | null = null;
@@ -65,12 +89,19 @@ export class Position {
   private following: { until: number; updatedAt: number } | null = null;
   private shown: string | null = null; // CFI of the page on screen, from the last relocate
   private timer: number | undefined;
+  // Back after being away, and the server hasn't said yet whether another device read on.
+  private unsure: { before: number; since: number } | null = null;
+  private asked: object | null = null;
+  private bookId: Id<"books">;
+  /** Replaced on each render, so the latest is always used. */
+  save: SavePosition;
+  fresh: FreshPosition | undefined;
 
-  constructor(
-    private bookId: Id<"books">,
-    /** Replaced on each render, so the latest is always used. */
-    public save: SavePosition,
-  ) {}
+  constructor(bookId: Id<"books">, save: SavePosition, fresh?: FreshPosition) {
+    this.bookId = bookId;
+    this.save = save;
+    this.fresh = fresh;
+  }
 
   /** The reader touched, keyed, scrolled or picked somewhere to go: the next move is theirs. */
   userActed() {
@@ -126,8 +157,16 @@ export class Position {
       return false;
     }
     this.following = null;
-    if (this.last && (!moved || Date.now() - Math.max(this.actedAt, this.narratedAt) > OWN_MOVE_MS)) return false;
-    this.last = { cfi: d.cfi, xpointer: xpointerOf(view, d), fraction: d.fraction, chapter, updatedAt: Date.now(), pushed: false };
+    if (!this.last) {
+      // The page a book first opens on isn't a place the reader chose: it mustn't count as newer
+      // than where they've read to on another device.
+      this.last = { cfi: d.cfi, fraction: d.fraction, chapter, updatedAt: 0, pushed: true };
+      this.pushedCfi = d.cfi;
+      writeLocal(this.bookId, this.last);
+      return false;
+    }
+    if (!moved || Date.now() - Math.max(this.actedAt, this.narratedAt) > OWN_MOVE_MS) return false;
+    this.last = { cfi: d.cfi, xpointer: xpointerOf(view, d), fraction: d.fraction, chapter, updatedAt: now(), pushed: false };
     writeLocal(this.bookId, this.last);
     window.clearTimeout(this.timer);
     this.timer = window.setTimeout(this.push, 1500);
@@ -148,17 +187,100 @@ export class Position {
     await view.goTo(await placeOf(view, remote));
   }
 
+  /** "Stay here": this device's place is the one that counts, over the other device's. */
+  stay() {
+    if (!this.last) return;
+    this.last = { ...this.last, updatedAt: now(), pushed: false };
+    this.pushedCfi = null;
+    writeLocal(this.bookId, this.last);
+    this.push();
+  }
+
+  /**
+   * The tab may have been out of touch: ask the server where things stand before saving anything.
+   * Pages turned in the meantime were turned without knowing another device had read on, so if one
+   * has, they don't overwrite it; the reader is offered the choice instead.
+   */
+  recheck(view: FoliateView, onNews: (r: Remote) => void) {
+    if (!this.fresh) return;
+    const unsure = (this.unsure ??= { before: this.last?.updatedAt ?? 0, since: Date.now() });
+    const asked = (this.asked = {});
+    const done = () => {
+      this.unsure = null;
+      this.push();
+    };
+    this.fresh().then(
+      (r) => {
+        if (asked !== this.asked) return;
+        const p = this.last;
+        const blind = r && p && r.device !== deviceId && r.updatedAt > unsure.before && p.updatedAt > unsure.before && !p.pushed && Date.now() - unsure.since < JUST_BACK_MS;
+        if (blind) {
+          this.last = { ...p, updatedAt: unsure.before, pushed: true };
+          this.pushedCfi = p.cfi;
+          window.clearTimeout(this.timer);
+          writeLocal(this.bookId, this.last);
+        }
+        done();
+        if (r && this.isNews(view, r)) onNews(r);
+      },
+      (e) => {
+        console.warn("Could not check the synced position", e);
+        if (asked === this.asked) done();
+      },
+    );
+  }
+
+  /** Recheck whenever the tab comes back from being away or offline. Returns the cleanup. */
+  recheckAfterAway(view: FoliateView, onNews: (r: Remote) => void) {
+    let seen = Date.now();
+    const check = () => {
+      if (document.visibilityState === "hidden") return;
+      const away = Date.now() - seen > AWAY_MS;
+      seen = Date.now();
+      if (away) this.recheck(view, onNews);
+    };
+    const online = () => this.recheck(view, onNews);
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("online", online);
+    // A computer going to sleep doesn't hide the tab: the clock jumping between ticks shows it.
+    const tick = window.setInterval(check, 15_000);
+    return () => {
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("online", online);
+      window.clearInterval(tick);
+    };
+  }
+
   push = () => {
     window.clearTimeout(this.timer);
     const p = this.last;
-    if (!p || p.pushed || p.cfi === this.pushedCfi) return;
+    if (this.unsure || !p || p.pushed || p.cfi === this.pushedCfi) return;
     this.pushedCfi = p.cfi;
+    const sent = Date.now();
     this.save({ bookId: this.bookId, cfi: p.cfi, xpointer: p.xpointer, fraction: p.fraction, chapter: p.chapter, device: deviceId, deviceName, updatedAt: p.updatedAt })
-      .then(() => {
-        if (this.last === p) {
-          this.last = { ...p, pushed: true };
-          writeLocal(this.bookId, this.last);
+      .then(({ saved, now: serverNow }) => {
+        const back = Date.now();
+        // Half the round trip ago, the server's clock said `serverNow`.
+        const correction = back - sent < CLOCK_ROUND_TRIP_MS ? serverNow - (sent + back) / 2 - clockOffset() : 0;
+        const wrongClock = Math.abs(correction) > 1000;
+        if (wrongClock) {
+          try {
+            localStorage.setItem(CLOCK, String(Math.round(clockOffset() + correction)));
+          } catch {
+            /* storage full or disabled */
+          }
         }
+        if (this.last !== p) return;
+        if (!saved && wrongClock) {
+          // Refused as older only because this device's clock is wrong: try again with the right time.
+          this.last = { ...p, updatedAt: p.updatedAt + correction };
+          this.pushedCfi = null;
+          writeLocal(this.bookId, this.last);
+          this.push();
+          return;
+        }
+        this.last = { ...p, pushed: true };
+        writeLocal(this.bookId, this.last);
       })
       .catch((e) => {
         console.warn("Position not synced yet", e);

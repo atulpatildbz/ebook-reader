@@ -11,9 +11,11 @@
 import type * as allowlist from "../allowlist.js";
 import type * as auth from "../auth.js";
 import type * as books from "../books.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as kosync from "../kosync.js";
 import type * as progress from "../progress.js";
+import type * as shared from "../shared.js";
 
 import type {
   ApiFromModules,
@@ -25,9 +27,11 @@ declare const fullApi: ApiFromModules<{
   allowlist: typeof allowlist;
   auth: typeof auth;
   books: typeof books;
+  crons: typeof crons;
   http: typeof http;
   kosync: typeof kosync;
   progress: typeof progress;
+  shared: typeof shared;
 }>;
 
 /**

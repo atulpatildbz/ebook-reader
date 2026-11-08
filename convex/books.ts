@@ -1,11 +1,11 @@
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireUser, allowedUser } from "./auth";
 import { format } from "./schema";
 import { internal } from "./_generated/api";
+import { MAX_BOOK_MB } from "./shared";
 
-const MAX_BOOK_MB = 300;
 const MAX_BOOK_BYTES = MAX_BOOK_MB * 1024 * 1024;
 const MAX_COVER_BYTES = 2 * 1024 * 1024;
 
@@ -47,6 +47,7 @@ export const list = query({
           title: b.title,
           author: b.author,
           format: b.format,
+          fileName: b.fileName,
           size: b.size,
           sha256: b.sha256,
           addedAt: b.addedAt,
@@ -175,5 +176,28 @@ export const remove = mutation({
       .collect();
     for (const p of progress) await ctx.db.delete(p._id);
     await ctx.db.delete(bookId);
+  },
+});
+
+/** An upload no book has claimed after this long was abandoned (the import failed, or the tab closed). */
+const ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** Delete uploaded files that never became part of a book. */
+export const sweepAbandonedUploads = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const inUse = new Set<string>();
+    for (const b of await ctx.db.query("books").collect()) {
+      inUse.add(b.fileId);
+      if (b.coverId) inUse.add(b.coverId);
+    }
+    const before = Date.now() - ABANDONED_AFTER_MS;
+    let removed = 0;
+    for (const file of await ctx.db.system.query("_storage").collect()) {
+      if (file._creationTime >= before || inUse.has(file._id)) continue;
+      await ctx.storage.delete(file._id);
+      removed++;
+    }
+    return removed;
   },
 });

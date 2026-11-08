@@ -73,6 +73,10 @@ export class Narrator {
   private userMovedAt = 0;
   private movedWhilePaused = false;
   private color: string;
+  // Goes up whenever what should happen next changes (pause, close, a new start). Whatever was
+  // waiting on something slow gives up if it finds this has moved on.
+  private run = 0;
+  private handedOver = false; // the player has been given the section being read
 
   constructor(
     private view: FoliateView,
@@ -109,7 +113,7 @@ export class Narrator {
     const d = (e as CustomEvent<{ section?: { current: number } }>).detail;
     this.userMovedAt = Date.now();
     // Moved to another section: what's being read is no longer on screen anywhere nearby.
-    if (this.state.status === "playing" && this.section && d.section && d.section.current !== this.section.index) this.pause();
+    if ((this.state.status === "playing" || this.state.status === "loading") && this.section && d.section && d.section.current !== this.section.index) this.pause();
     if (this.state.status === "paused") this.movedWhilePaused = true;
   };
 
@@ -127,7 +131,7 @@ export class Narrator {
         this.lastStalls = st.stalls.count;
         if (st.speed) this.set({ speed: st.speed.recent, stalls: st.stalls.count - this.stallBase });
       },
-      onError: (m: string) => this.set({ error: m }),
+      onError: (m: string) => this.fail(m),
       onEnd: () => void this.nextSection(),
     };
     const english = /^en\b/i.test(this.opts.lang);
@@ -158,7 +162,7 @@ export class Narrator {
     const contents = this.renderer.getContents()[0];
     if (!contents) return;
     const same = this.useSection(contents);
-    if (same && this.state.status === "paused" && this.player && this.sentence >= 0 && (!this.movedWhilePaused || this.visible(this.sentence))) {
+    if (same && this.state.status === "paused" && this.player && this.handedOver && this.sentence >= 0 && (!this.movedWhilePaused || this.visible(this.sentence))) {
       if (this.voice === this.startedVoice) this.player.resume();
       else void this.start(this.sentence);
       return;
@@ -217,12 +221,16 @@ export class Narrator {
     const text = this.section?.text;
     if (!text) return;
     if (from >= text.pieces.length) return this.nextSection();
-    this.set({ status: "loading", ahead: null, left: this.leftFrom(from) });
+    const run = ++this.run;
+    this.handedOver = false;
+    this.set({ status: "loading", ahead: null, left: this.leftFrom(from), error: null });
     this.sentence = from;
     this.startedVoice = this.voice;
     this.paintStyle(text.doc);
     this.mediaSession();
     const player = await this.engine();
+    if (run !== this.run) return;
+    this.handedOver = true;
     void player.play(text.pieces, from, this.voice === DEVICE_VOICE ? "" : this.voice, this.rate);
   }
 
@@ -296,7 +304,10 @@ export class Narrator {
     let i = (this.section?.index ?? -1) + 1;
     while (i < sections.length && (sections[i].linear === "no" || !sections[i].createDocument)) i++;
     this.clearHighlight();
+    const run = ++this.run;
+    this.handedOver = false;
     if (i >= sections.length) {
+      this.releaseMediaSession();
       this.set({ status: "idle" });
       return;
     }
@@ -307,6 +318,7 @@ export class Narrator {
     } finally {
       this.turning = false;
     }
+    if (run !== this.run) return; // paused or closed while the chapter was opening
     const contents = this.renderer.getContents()[0];
     if (!contents || contents.index !== i) return this.set({ status: "idle" });
     this.section = { index: i, text: sectionText(contents.doc, this.opts.lang) };
@@ -391,14 +403,27 @@ export class Narrator {
   }
 
   pause() {
-    this.player?.pause();
+    this.run++;
     this.movedWhilePaused = false;
+    // Between chapters, or still starting, the player has nothing to pause yet.
+    if (this.handedOver && this.player) this.player.pause();
+    else this.set({ status: "paused" });
   }
 
   /** Back or forward by sentences, within the section. */
   skip(delta: number) {
     if (!this.section || this.sentence < 0) return;
     this.userMovedAt = 0;
+    const here = this.renderer.getContents().find((c) => c.index === this.section!.index);
+    if (!here) {
+      // The reader has gone to another chapter (while paused): carry on from there.
+      const contents = this.renderer.getContents()[0];
+      if (!contents) return;
+      this.useSection(contents);
+      void this.start(this.firstOnScreen());
+      return;
+    }
+    this.useSection(here);
     const n = this.section.text.pieces.length;
     void this.start(Math.max(0, Math.min(n - 1, this.sentence + delta)));
   }
@@ -420,20 +445,35 @@ export class Narrator {
   }
 
   stop() {
+    this.halt();
+    this.releaseMediaSession();
+    this.set({ status: "idle", download: null, ahead: null, left: null });
+  }
+
+  /** Narration can't carry on: stop, and say why. Play tries again. */
+  private fail(message: string) {
+    this.halt();
+    this.set({ status: "idle", download: null, ahead: null, error: message });
+  }
+
+  private halt() {
+    this.run++;
+    this.handedOver = false;
     this.player?.stop();
     this.clearHighlight();
     this.sentence = -1;
     this.word = null;
-    this.set({ status: "idle", download: null, ahead: null, left: null });
   }
 
   destroy() {
     this.stop();
     this.view.removeEventListener("relocate", this.onRelocate);
-    if ("mediaSession" in navigator) {
-      for (const a of ["play", "pause", "previoustrack", "nexttrack", "stop"] as const) navigator.mediaSession.setActionHandler(a, null);
-      navigator.mediaSession.metadata = null;
-    }
+  }
+
+  private releaseMediaSession() {
+    if (!("mediaSession" in navigator)) return;
+    for (const a of ["play", "pause", "previoustrack", "nexttrack", "stop"] as const) navigator.mediaSession.setActionHandler(a, null);
+    navigator.mediaSession.metadata = null;
   }
 
   /** Lock-screen and headphone controls. */

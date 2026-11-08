@@ -85,15 +85,18 @@ export class BrowserPlayer implements Player {
     }
   }
 
+  // Pausing cancels the speech and resuming starts the sentence again. The browser's own pause is
+  // unreliable on Android, and it outlives a cancel, leaving whatever's spoken next silent.
   pause() {
     this.paused = true;
-    speechSynthesis.pause();
+    this.run++;
+    speechSynthesis.cancel();
     this.events.onState("paused");
   }
 
   resume() {
     this.paused = false;
-    speechSynthesis.resume();
+    this.startAt(this.current);
     this.events.onState("playing");
   }
 

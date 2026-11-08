@@ -5,9 +5,14 @@ import { api } from "../convex/_generated/api";
 import { NOT_ALLOWED } from "../convex/shared";
 import { useApplyTheme, useTheme } from "./lib/settings";
 import { useRoute } from "./lib/route";
-import { Library } from "./library/Library";
+import { clearShelf, readShelf } from "./lib/shelf";
+import { Library, OfflineLibrary } from "./library/Library";
 import { SyncedReader } from "./reader/Reader";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { RibbonMark } from "./ui/icons";
+
+/** How long to wait for the server before showing what's on this device instead. */
+const SERVER_PATIENCE_MS = 2500;
 
 function errorText(e: unknown) {
   return e instanceof Error ? `${e.message} ${String((e as { data?: unknown }).data ?? "")}` : String(e);
@@ -43,11 +48,25 @@ export default function App() {
   const finishing = useOAuthCode(() => setRefused(true));
   const me = useQuery(api.books.me, isAuthenticated ? {} : "skip");
   const route = useRoute();
+  const [shelf] = useState(readShelf);
+  const [outOfPatience, setOutOfPatience] = useState(!navigator.onLine);
+  useEffect(() => {
+    const t = window.setTimeout(() => setOutOfPatience(true), SERVER_PATIENCE_MS);
+    return () => window.clearTimeout(t);
+  }, []);
 
-  if (isLoading || finishing || (isAuthenticated && me === undefined)) return <Splash />;
-  if (!isAuthenticated) return <SignIn refused={refused} />;
-  if (!me) return <NoAccess />;
-  return route.name === "read" ? <SyncedReader key={route.bookId} bookId={route.bookId} /> : <Library me={me} />;
+  const waiting = isLoading || finishing || (isAuthenticated && me === undefined);
+  useEffect(() => {
+    if (!waiting && !isAuthenticated) clearShelf();
+  }, [waiting, isAuthenticated]);
+
+  const reader = route.name === "read" && <SyncedReader key={route.bookId} bookId={route.bookId} />;
+  // Nothing in the app is reachable without the server except what's already on this device.
+  const offline = waiting && !finishing && outOfPatience ? shelf : null;
+  if (waiting && !offline) return <Splash />;
+  if (!waiting && !isAuthenticated) return <SignIn refused={refused} />;
+  if (!waiting && !me) return <NoAccess />;
+  return <ErrorBoundary key={route.name === "read" ? route.bookId : "library"}>{reader || (offline ? <OfflineLibrary shelf={offline} /> : <Library me={me!} />)}</ErrorBoundary>;
 }
 
 function Splash() {

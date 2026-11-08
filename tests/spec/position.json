@@ -1,0 +1,106 @@
+{
+  "about": "Keeping the reading place across devices. Each case is a story told in steps to one device, with a fake clock (this device's starts at 1000000 ms) and a fake server. `server` gives the server's position and how far its clock is ahead of this device's. Steps: open {local, remote} opens the book with this device's stored position and what the server said; show puts a page on screen; touch is the reader touching or keying; wait passes time; hide and reveal are the tab being hidden and shown; other-device-saves is another device reading on; server-answers is the server answering a question asked earlier; stay is pressing Stay here; expect checks what the server accepted (saved), what it refused (refused, a count), the page offered to go to (offered), and this device's stored time (local-updated-at).",
+  "cases": [
+    {
+      "name": "the page a book first opens on isn't saved as reading; the first real move is",
+      "steps": [
+        { "open": { "local": null, "remote": null } },
+        { "show": "first-page" },
+        { "wait": 5000 },
+        { "expect": { "saved": [], "local-updated-at": 0 } },
+        { "touch": true },
+        { "show": "second-page" },
+        { "wait": 2000 },
+        { "expect": { "saved": ["second-page"] } }
+      ]
+    },
+    {
+      "name": "a page turned in a tab just back from sleep doesn't overwrite where another device read to",
+      "steps": [
+        { "open": { "local": { "cfi": "ch3", "updatedAt": 900000, "pushed": true }, "remote": null } },
+        { "show": "ch3" },
+        { "hide": true },
+        { "wait": 86400000 },
+        { "other-device-saves": "ch7" },
+        { "reveal": true },
+        { "touch": true },
+        { "show": "ch3-next" },
+        { "wait": 3000 },
+        { "expect": { "saved": [] } },
+        { "server-answers": true },
+        { "expect": { "saved": [], "offered": "ch7", "local-updated-at": 900000 } }
+      ]
+    },
+    {
+      "name": "if nobody else read on, the page turned just after coming back is saved",
+      "steps": [
+        { "open": { "local": { "cfi": "ch3", "updatedAt": 900000, "pushed": true }, "remote": null } },
+        { "show": "ch3" },
+        { "hide": true },
+        { "wait": 86400000 },
+        { "reveal": true },
+        { "touch": true },
+        { "show": "ch3-next" },
+        { "wait": 3000 },
+        { "expect": { "saved": [] } },
+        { "server-answers": true },
+        { "expect": { "saved": ["ch3-next"], "offered": null } }
+      ]
+    },
+    {
+      "name": "Stay here makes this device's place the one that counts",
+      "steps": [
+        { "open": { "local": { "cfi": "ch3", "updatedAt": 900000, "pushed": true }, "remote": null } },
+        { "show": "ch3" },
+        { "hide": true },
+        { "wait": 86400000 },
+        { "other-device-saves": "ch7" },
+        { "reveal": true },
+        { "touch": true },
+        { "show": "ch3-next" },
+        { "server-answers": true },
+        { "expect": { "saved": [], "offered": "ch7" } },
+        { "stay": true },
+        { "wait": 100 },
+        { "expect": { "saved": ["ch3-next"] } }
+      ]
+    },
+    {
+      "name": "coming back with no page turned still offers the other device's place",
+      "steps": [
+        { "open": { "local": { "cfi": "ch3", "updatedAt": 900000, "pushed": true }, "remote": null } },
+        { "show": "ch3" },
+        { "hide": true },
+        { "wait": 86400000 },
+        { "other-device-saves": "ch7" },
+        { "reveal": true },
+        { "server-answers": true },
+        { "expect": { "saved": [], "offered": "ch7" } }
+      ]
+    },
+    {
+      "name": "a device whose clock is ten minutes slow still gets its reading saved, first time and after",
+      "server": { "aheadBy": 600000, "position": { "cfi": "phone-page", "device": "phone", "age": 60000 } },
+      "steps": [
+        { "open": { "local": { "cfi": "here", "updatedAt": 999000, "pushed": true }, "remote": null } },
+        { "show": "here" },
+        { "touch": true },
+        { "show": "next" },
+        { "wait": 2000 },
+        { "expect": { "saved": ["next"], "refused": 1 } },
+        { "touch": true },
+        { "show": "after-that" },
+        { "wait": 2000 },
+        { "expect": { "saved": ["next", "after-that"], "refused": 1 } }
+      ]
+    },
+    {
+      "name": "reading done offline last time is sent when the book is next opened",
+      "steps": [
+        { "open": { "local": { "cfi": "read-offline", "updatedAt": 999000, "pushed": false }, "remote": { "cfi": "older", "device": "phone", "updatedAt": 900000 } } },
+        { "wait": 100 },
+        { "expect": { "saved": ["read-offline"] } }
+      ]
+    }
+  ]
+}

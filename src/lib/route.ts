@@ -5,7 +5,11 @@ type Route = { name: "library" } | { name: "read"; bookId: string };
 
 function parse(): Route {
   const m = location.hash.match(/^#\/read\/([^/?]+)/);
-  return m ? { name: "read", bookId: decodeURIComponent(m[1]) } : { name: "library" };
+  try {
+    return m ? { name: "read", bookId: decodeURIComponent(m[1]) } : { name: "library" };
+  } catch {
+    return { name: "library" }; // a mangled link
+  }
 }
 
 let current = parse();

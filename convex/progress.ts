@@ -48,7 +48,10 @@ export const get = query({
   },
 });
 
-/** Store the reading position. A position older than the stored one is ignored (returns false). */
+/**
+ * Store the reading position. A position older than the stored one is ignored (`saved: false`).
+ * `now` is the server's clock, so a device can tell if its own is wrong.
+ */
 export const save = mutation({
   args: {
     bookId: v.id("books"),
@@ -62,13 +65,14 @@ export const save = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    if (!(await ownBook(ctx, user._id, args.bookId))) return false;
+    const answer = (saved: boolean) => ({ saved, now: Date.now() });
+    if (!(await ownBook(ctx, user._id, args.bookId))) return answer(false);
     // A device with a clock far in the future must not pin the position forever.
     const row = stored({ ...args, userId: user._id, updatedAt: Math.min(args.updatedAt, Date.now() + 60_000) });
     const existing = await findProgress(ctx, user._id, args.bookId);
-    if (existing && existing.updatedAt > row.updatedAt) return false;
-    if (existing && existing.cfi === row.cfi && existing.device === row.device) return true;
+    if (existing && existing.updatedAt > row.updatedAt) return answer(false);
+    if (existing && existing.cfi === row.cfi && existing.device === row.device) return answer(true);
     await writeProgress(ctx, existing, row);
-    return true;
+    return answer(true);
   },
 });

@@ -1,26 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { download, getCached, putCached } from "../lib/bookCache";
+import { download, getCached, putCached, sha256 } from "../lib/bookCache";
 import { loadFoliate, type FoliateView, type RelocateDetail, type TocItem } from "../lib/foliate";
 import { duration, pct } from "../lib/format";
 import { openLibrary } from "../lib/route";
 import { setSettings, useSettings, useTheme } from "../lib/settings";
+import { readShelf } from "../lib/shelf";
 import { IconButton } from "../ui/controls";
 import { Back, Close, Contents, Copy, Headphones, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "../ui/icons";
 import { applyToView, PAGE_MARGIN } from "./bookStyles";
 import { ContentsPanel } from "./ContentsPanel";
+import { keyTarget, pageKey } from "./keys";
 import { CopyPanel } from "./copy/CopyPanel";
 import { NarrationBar, narrationStatus } from "./narration/NarrationBar";
 import { useNarration } from "./narration/useNarration";
-import { Position, type Remote, type SavePosition } from "./position";
+import { Position, type FreshPosition, type Remote, type SavePosition } from "./position";
 import { SearchPanel } from "./search/SearchPanel";
 import { useBookSearch } from "./search/useBookSearch";
 import { SettingsPanel } from "./SettingsPanel";
 
 export type ReaderBook = Pick<NonNullable<FunctionReturnType<typeof api.books.get>>, "title" | "author" | "fileName" | "sha256" | "fileUrl">;
+
+/** How long to wait for the server before opening a book that's already on this device. */
+const SERVER_PATIENCE_MS = 1500;
 
 function timeLeft(min?: number) {
   if (min === undefined || !isFinite(min)) return "";
@@ -30,14 +35,47 @@ function timeLeft(min?: number) {
 /** The reader, wired to Convex: the book's file URL, the live synced position, and saving it. */
 export function SyncedReader({ bookId }: { bookId: string }) {
   const id = bookId as Id<"books">;
-  const book = useQuery(api.books.get, { bookId: id });
-  const remote = useQuery(api.progress.get, { bookId: id });
+  const { isAuthenticated } = useConvexAuth();
+  const live = useQuery(api.books.get, isAuthenticated ? { bookId: id } : "skip");
+  const liveRemote = useQuery(api.progress.get, isAuthenticated ? { bookId: id } : "skip");
   const save = useMutation(api.progress.save);
-  return <Reader bookId={id} book={book} remote={remote} save={save} />;
+  const convex = useConvex();
+  const fresh = useCallback(() => convex.query(api.progress.get, { bookId: id }), [convex, id]);
+
+  // The server is slow or out of reach: a book already on this device opens without it, at this
+  // device's position. If the server has a newer one when it answers, the reader is offered it.
+  const [onDevice, setOnDevice] = useState<ReaderBook | null>(null);
+  const waiting = live === undefined;
+  useEffect(() => {
+    if (!waiting) return;
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      const b = readShelf()?.books.find((x) => x._id === id);
+      if (b && (await getCached(b.sha256)) && !cancelled) setOnDevice({ ...b, fileUrl: null });
+    }, SERVER_PATIENCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [waiting, id]);
+
+  return <Reader bookId={id} book={live === undefined ? (onDevice ?? undefined) : live} remote={liveRemote === undefined && onDevice ? null : liveRemote} save={save} fresh={fresh} />;
 }
 
 /** `book`/`remote`: undefined while loading, null when there is none. */
-export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; book: ReaderBook | null | undefined; remote: Remote | null | undefined; save: SavePosition }) {
+export function Reader({
+  bookId,
+  book,
+  remote,
+  save,
+  fresh,
+}: {
+  bookId: Id<"books">;
+  book: ReaderBook | null | undefined;
+  remote: Remote | null | undefined;
+  save: SavePosition;
+  fresh?: FreshPosition;
+}) {
   const settings = useSettings();
   const theme = useTheme();
 
@@ -57,8 +95,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const pickTimer = useRef(0);
 
   const host = useRef<HTMLDivElement>(null);
-  const [position] = useState(() => new Position(bookId, save));
+  const [position] = useState(() => new Position(bookId, save, fresh));
   position.save = save;
+  position.fresh = fresh;
   // The open book reads the latest of these through refs, so a re-render never reopens it.
   const remoteRef = useRef(remote);
   remoteRef.current = remote;
@@ -79,16 +118,21 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   });
 
   const fileUrl = book?.fileUrl;
+  // The copy on this device wouldn't open: get it again rather than be stuck with it.
+  const [cacheBad, setCacheBad] = useState(false);
+  const fromCache = useRef(false);
   useEffect(() => {
     if (!book) return;
     let cancelled = false;
     (async () => {
-      let blob = await getCached(book.sha256);
+      let blob = cacheBad ? undefined : await getCached(book.sha256);
+      fromCache.current = !!blob;
       if (!blob) {
         if (!fileUrl) throw new Error("The file for this book is missing.");
         setDownloaded(0);
         blob = await download(fileUrl, setDownloaded);
-        void putCached(book.sha256, blob);
+        // Only a whole copy is worth keeping.
+        if ((await sha256(blob)) === book.sha256) void putCached(book.sha256, blob);
       }
       if (!cancelled) setFile(new File([blob], book.fileName, { type: blob.type }));
     })().catch((e) => !cancelled && setFailure(e instanceof Error ? e.message : String(e)));
@@ -97,7 +141,7 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     };
     // The file never changes for a book; a refreshed download URL is not a reason to reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book?.sha256]);
+  }, [book?.sha256, cacheBad]);
 
   useEffect(() => {
     if (book) document.title = book.title;
@@ -134,20 +178,19 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
         setChrome(false);
         return;
       }
-      if (((e.metaKey || e.ctrlKey) && k === "f" && !e.altKey) || (k === "/" && !(e.target instanceof HTMLInputElement))) {
+      const target = keyTarget(e.target);
+      if (((e.metaKey || e.ctrlKey) && k === "f" && !e.altKey) || (k === "/" && target !== "field")) {
         e.preventDefault();
         setPanel("search");
         return;
       }
-      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (k === "ArrowLeft" || k === "h") navigate("left");
-      else if (k === "ArrowRight" || k === "l") navigate("right");
-      else if (k === "PageDown" || (k === " " && !e.shiftKey) || k === "j") navigate("next");
-      else if (k === "PageUp" || (k === " " && e.shiftKey) || k === "k") navigate("prev");
-      else return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const dir = pageKey(k, e.shiftKey, target, panel !== null);
+      if (!dir) return;
+      navigate(dir);
       e.preventDefault();
     },
-    [navigate],
+    [navigate, panel],
   );
 
   onKeyRef.current = onKey;
@@ -218,7 +261,13 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
       if (!cancelled) setView(v);
     })().catch((e) => {
       console.error(e);
-      if (!cancelled) setFailure("This book could not be opened. The file may be damaged or DRM-protected.");
+      if (cancelled) return;
+      if (fromCache.current && navigator.onLine && fileUrl) {
+        setFile(null);
+        setCacheBad(true);
+        return;
+      }
+      setFailure("This book could not be opened. The file may be damaged or DRM-protected.");
     });
     return () => {
       cancelled = true;
@@ -231,9 +280,11 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     };
   }, [ready, file, position]);
 
+  // Each application lays the book out again, so only when something that affects it has changed.
+  const look = JSON.stringify([{ ...settings, narrationRate: 0, narrationVoice: "", copyPartWords: 0, dim: 0 }, theme]);
   useEffect(() => {
-    if (view) applyToView(view, settings, theme);
-  }, [view, settings, theme]);
+    if (view) applyToView(view, settingsRef.current, themeRef.current);
+  }, [view, look]);
 
   const listen = () => {
     narration.listen();
@@ -248,6 +299,8 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   useEffect(() => {
     if (remote && view && position.isNews(view, remote)) setOffer(remote);
   }, [remote, view, position]);
+
+  useEffect(() => (view ? position.recheckAfterAway(view, setOffer) : undefined), [view, position]);
 
   const jump = async (r: Remote) => {
     if (!view) return;
@@ -477,7 +530,13 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
               <button onClick={() => void jump(offer)} className="rounded-full bg-[var(--ribbon)] px-4 py-1.5 font-medium text-[var(--on-ribbon)]">
                 Go there
               </button>
-              <button onClick={() => setOffer(null)} className="rounded-full px-3 py-1.5 text-[var(--muted)]">
+              <button
+                onClick={() => {
+                  position.stay();
+                  setOffer(null);
+                }}
+                className="rounded-full px-3 py-1.5 text-[var(--muted)]"
+              >
                 Stay here
               </button>
             </div>

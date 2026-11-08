@@ -1,0 +1,15 @@
+{
+  "about": "Which keys turn the page. Input: the key, whether Shift is held, what it was pressed on (page, button, or field: a text box, dropdown or slider, which use keys themselves), and whether a panel is open over the book. Output: left, right, next, prev, or null for not turning the page.",
+  "cases": [
+    { "name": "arrow on the page", "key": "ArrowRight", "shift": false, "target": "page", "panel": false, "turn": "right" },
+    { "name": "space on the page goes on", "key": " ", "shift": false, "target": "page", "panel": false, "turn": "next" },
+    { "name": "shift-space on the page goes back", "key": " ", "shift": true, "target": "page", "panel": false, "turn": "prev" },
+    { "name": "space on a focused button presses it", "key": " ", "shift": false, "target": "button", "panel": false, "turn": null },
+    { "name": "an arrow still turns the page after clicking a button", "key": "ArrowLeft", "shift": false, "target": "button", "panel": false, "turn": "left" },
+    { "name": "arrows on a dropdown change it", "key": "ArrowRight", "shift": false, "target": "field", "panel": false, "turn": null },
+    { "name": "typing j in a box is typing", "key": "j", "shift": false, "target": "field", "panel": false, "turn": null },
+    { "name": "the book stays put behind an open panel: arrow", "key": "ArrowRight", "shift": false, "target": "page", "panel": true, "turn": null },
+    { "name": "the book stays put behind an open panel: space", "key": " ", "shift": false, "target": "button", "panel": true, "turn": null },
+    { "name": "other keys do nothing", "key": "x", "shift": false, "target": "page", "panel": false, "turn": null }
+  ]
+}

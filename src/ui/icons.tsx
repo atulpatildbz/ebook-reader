@@ -15,6 +15,7 @@ export const RibbonMark = ({ className }: P) => (
 
 export const Back = (p: P) => <Stroke {...p} d="M15 5l-7 7 7 7" />;
 export const Contents = (p: P) => <Stroke {...p} d="M4 6h16M4 12h11M4 18h14" />;
+export const ChevronDown = (p: P) => <Stroke {...p} d="M6 9l6 6 6-6" />;
 export const Close = (p: P) => <Stroke {...p} d="M6 6l12 12M18 6L6 18" />;
 export const Plus = (p: P) => <Stroke {...p} d="M12 5v14M5 12h14" />;
 export const More = (p: P) => <Stroke {...p} d="M5 12h.01M12 12h.01M19 12h.01" />;

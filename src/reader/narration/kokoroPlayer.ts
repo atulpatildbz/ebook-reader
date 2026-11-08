@@ -26,6 +26,8 @@ const QUEUED = 3;
 // After running out, wait until this much listening time is ready before carrying on.
 export const REBUFFER_SECONDS = 20;
 const PARAGRAPH_PAUSE = 0.35;
+// A sentence the model can't make is skipped; this many in a row means the model itself has failed.
+const MAX_FAILED_SENTENCES = 3;
 
 /**
  * How fast the voice itself speaks for a listening speed; playback makes up the rest. Up to 1.25×
@@ -61,7 +63,7 @@ function silence(seconds: number, rate = 8000): string {
 }
 
 export class KokoroPlayer implements Player {
-  private worker = new Worker(new URL("./kokoro.worker.ts", import.meta.url), { type: "module" });
+  private worker!: Worker;
   private ready: Promise<void> | null = null;
   private onReady = () => {};
   private ctx: AudioContext | null = null;
@@ -88,6 +90,8 @@ export class KokoroPlayer implements Player {
   private waitingSince: number | null = null; // playback is waiting on synthesis
   private rebuffering = false; // ran out mid-way: waiting to get well ahead
   private paused = false;
+  private waking = false; // the audio is being started, so it may still report being stopped
+  private failedInARow = 0;
   private frame = 0;
   private shownWord = -1;
 
@@ -96,9 +100,44 @@ export class KokoroPlayer implements Player {
     public events: Events,
     private dtype?: Dtype,
   ) {
-    this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
+    this.spawn();
     this.media.src = silence(10);
     this.media.loop = true;
+    this.media.onpause = () => this.media.paused && this.interrupted();
+  }
+
+  private spawn() {
+    this.worker = new Worker(new URL("./kokoro.worker.ts", import.meta.url), { type: "module" });
+    this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
+    this.worker.onerror = (e) => this.broken(e.message || "The voice could not start");
+  }
+
+  /** The model can't be used: stop, start again from nothing next time, and say why. */
+  private broken(message: string) {
+    this.stop();
+    this.worker.terminate();
+    this.spawn();
+    this.requests.clear();
+    this.failedInARow = 0;
+    this.ready = null;
+    this.events.onError(message);
+    this.onReady(); // lets a play() still waiting on the load finish (it finds it was stopped)
+  }
+
+  /** Something else took the sound away (a call, another app): show paused, not playing in silence. */
+  private interrupted() {
+    if (this.paused || this.waking || (!this.slots.length && this.waitingSince === null)) return;
+    this.pause();
+  }
+
+  /** Start the sound, from a tap or a media key. */
+  private wake() {
+    const ctx = this.ctx;
+    if (ctx) {
+      this.waking = true;
+      void ctx.resume().finally(() => (this.waking = false));
+    }
+    void this.media.play().catch(() => {});
   }
 
   private send(msg: ToWorker) {
@@ -119,15 +158,21 @@ export class KokoroPlayer implements Player {
       this.setStats({ device: msg.device, dtype: msg.dtype, loadMs: msg.ms });
       this.onReady();
     } else if (msg.type === "error") {
-      this.events.onError(msg.message);
-      if (msg.id === undefined) this.events.onState("idle");
-      else this.requests.delete(msg.id);
+      const req = msg.id === undefined ? undefined : this.requests.get(msg.id);
+      if (!req || ++this.failedInARow >= MAX_FAILED_SENTENCES) return this.broken(msg.message);
+      // One bad sentence shouldn't end the chapter: a moment's silence stands in for it.
+      console.warn("Skipping a sentence the voice could not make", msg.message);
+      this.requests.delete(msg.id!);
+      const sampleRate = 24000;
+      this.keep(req.key, { pcm: new Int16Array(sampleRate / 20), sampleRate, seconds: 0.05, pace: 1, words: [] });
+      this.madeOne();
     } else if (msg.type === "skipped") {
       this.requests.delete(msg.id);
       this.request();
     } else {
       const req = this.requests.get(msg.id);
       this.requests.delete(msg.id);
+      this.failedInARow = 0;
       const seconds = msg.samples.length / msg.sampleRate;
       const pace = req?.pace ?? 1;
       // Speed is measured in speech at normal pace, so it compares directly with listening speed.
@@ -149,13 +194,18 @@ export class KokoroPlayer implements Player {
       const pcm = new Int16Array(msg.samples.length);
       for (let i = 0; i < pcm.length; i++) pcm[i] = Math.max(-1, Math.min(1, msg.samples[i])) * 0x7fff;
       this.keep(req.key, { pcm, sampleRate: msg.sampleRate, seconds, pace, words: msg.words });
-      this.reportAhead();
-      this.request();
-      // Queue it straight away if it's next: waiting until the sentence playing ends would leave
-      // a gap while it's queued.
-      if (this.waitingSince !== null) this.tryResume();
-      else if (this.slots.length) this.schedule();
+      this.madeOne();
     }
+  }
+
+  /** A sentence has just been made. */
+  private madeOne() {
+    this.reportAhead();
+    this.request();
+    // Queue it straight away if it's next: waiting until the sentence playing ends would leave
+    // a gap while it's queued.
+    if (this.waitingSince !== null) this.tryResume();
+    else if (this.slots.length) this.schedule();
   }
 
   private key(i: number) {
@@ -199,17 +249,19 @@ export class KokoroPlayer implements Player {
     this.stop();
     const run = this.run;
     // Inside the tap that started narration, so the browser lets sound play.
-    this.ctx ??= new AudioContext({ latencyHint: "playback" });
-    void this.ctx.resume();
-    void this.media.play().catch(() => {});
+    if (!this.ctx) {
+      this.ctx = new AudioContext({ latencyHint: "playback" });
+      this.ctx.onstatechange = () => this.ctx?.state !== "running" && this.interrupted();
+    }
+    this.wake();
     this.sentences = sentences;
     this.voice = voice;
     this.rate = rate;
     this.current = from - 1;
+    this.waitingSince = performance.now();
     this.events.onState("loading");
     await this.load();
     if (run !== this.run) return;
-    this.waitingSince = performance.now();
     // Known to be slower than this speed (from earlier listening): get ahead before starting.
     this.rebuffering = (this.stats.speed?.recent ?? Infinity) < rate;
     this.request();
@@ -387,8 +439,7 @@ export class KokoroPlayer implements Player {
 
   resume() {
     this.paused = false;
-    void this.ctx?.resume();
-    void this.media.play().catch(() => {});
+    this.wake();
     if (this.waitingSince !== null) {
       this.events.onState("loading");
       this.tryResume();

@@ -1,7 +1,8 @@
 import type { ConvexReactClient } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { putCached } from "../lib/bookCache";
+import { MAX_BOOK_MB } from "../../convex/shared";
+import { putCached, sha256 } from "../lib/bookCache";
 import { authors, loadFoliate, text } from "../lib/foliate";
 
 type Format = Doc<"books">["format"];
@@ -27,11 +28,6 @@ export const FORMAT_NAMES = new Intl.ListFormat("en", { type: "disjunction" }).f
 function formatOf(file: File): Format | null {
   const ext = file.name.toLowerCase().split(".").pop() ?? "";
   return (entries.find(([, f]) => f.exts.includes(ext)) ?? entries.find(([, f]) => f.types.includes(file.type)))?.[0] ?? null;
-}
-
-async function sha256(file: Blob) {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** A small JPEG of the cover, so the library loads quickly on a phone. */
@@ -74,6 +70,7 @@ export async function importBook(
 ): Promise<ImportResult> {
   const format = formatOf(file);
   if (!format) throw new Error(`Not a book file. Use ${FORMAT_NAMES}.`);
+  if (file.size > MAX_BOOK_MB * 1024 * 1024) throw new Error(`This file is larger than ${MAX_BOOK_MB} MB.`);
 
   onStage("Reading");
   const sha = await sha256(file);

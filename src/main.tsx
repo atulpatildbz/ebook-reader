@@ -30,4 +30,18 @@ if (import.meta.env.DEV && harness?.startsWith("library")) {
       </ConvexAuthProvider>
     </StrictMode>,
   );
+  if (import.meta.env.PROD && "serviceWorker" in navigator) {
+    void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`);
+    // First visit: what's already loaded went past the worker, so it's asked to keep those too.
+    if (!navigator.serviceWorker.controller) {
+      void navigator.serviceWorker.ready.then((r) =>
+        r.active?.postMessage(
+          performance
+            .getEntriesByType("resource")
+            .map((e) => e.name)
+            .filter((u) => u.startsWith(location.origin)),
+        ),
+      );
+    }
+  }
 }

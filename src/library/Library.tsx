@@ -3,10 +3,12 @@ import { useConvex, useMutation, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
-import { dropCached, persistStorage } from "../lib/bookCache";
+import { cachedHashes, dropCached, persistStorage } from "../lib/bookCache";
+import { errorMessage } from "../lib/errors";
 import { pct } from "../lib/format";
 import { openBook } from "../lib/route";
 import { setSettings, useTheme } from "../lib/settings";
+import { saveShelf, type Shelf } from "../lib/shelf";
 import { Moon, More, Plus, RibbonMark, Sun } from "../ui/icons";
 import { EReaderSync } from "./EReaderSync";
 import { ACCEPT, FORMAT_NAMES, importBook } from "./importBook";
@@ -30,11 +32,24 @@ function readingState(b: Book): "new" | "reading" | "finished" {
 }
 
 export function Library({ me }: { me: Me }) {
-  return <LibraryView me={me} books={useQuery(api.books.list)} />;
+  const books = useQuery(api.books.list);
+  useEffect(() => {
+    if (books) saveShelf({ me, books });
+  }, [me, books]);
+  return <LibraryView me={me} books={books} />;
 }
 
-/** `books`: undefined while loading. */
-export function LibraryView({ me, books }: { me: Me; books: Book[] | null | undefined }) {
+/** No connection: the books from the last visit that are downloaded on this device. */
+export function OfflineLibrary({ shelf }: { shelf: Shelf }) {
+  const [books, setBooks] = useState<Book[]>();
+  useEffect(() => {
+    void cachedHashes().then((hashes) => setBooks(shelf.books.filter((b) => hashes.includes(b.sha256))));
+  }, [shelf]);
+  return <LibraryView me={shelf.me} books={books} offline />;
+}
+
+/** `books`: undefined while loading. `offline`: only reading is possible. */
+export function LibraryView({ me, books, offline = false }: { me: Me; books: Book[] | null | undefined; offline?: boolean }) {
   const convex = useConvex();
   const theme = useTheme();
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -47,6 +62,7 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
   }, []);
 
   const addFiles = async (files: File[]) => {
+    if (offline) return;
     persistStorage();
     for (const file of files) {
       const id = nextId.current++;
@@ -57,11 +73,14 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
         if (duplicate) patch({ stage: "Done", note: "Already on your shelf" });
         else setUploads((u) => u.filter((x) => x.id !== id));
       } catch (e) {
-        patch({ error: e instanceof Error ? e.message : String(e) });
+        console.error(e);
+        patch({ error: errorMessage(e) });
       }
     }
   };
 
+  const addFilesRef = useRef(addFiles);
+  addFilesRef.current = addFiles;
   useEffect(() => {
     let depth = 0;
     const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files");
@@ -73,7 +92,7 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
       e.preventDefault();
       depth = 0;
       setDragging(false);
-      void addFiles([...(e.dataTransfer?.files ?? [])]);
+      void addFilesRef.current([...(e.dataTransfer?.files ?? [])]);
     };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragleave", leave);
@@ -85,7 +104,7 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
       window.removeEventListener("dragover", over);
       window.removeEventListener("drop", drop);
     };
-  });
+  }, []);
 
   const current = books?.find((b) => b.progress && readingState(b) !== "finished");
 
@@ -103,12 +122,14 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
           >
             {theme.dark ? <Sun /> : <Moon />}
           </button>
-          <button
-            onClick={() => input.current?.click()}
-            className="ml-1 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--fg)] pr-4 pl-3 text-sm font-medium text-[var(--bg)]"
-          >
-            <Plus className="h-4 w-4" /> Add books
-          </button>
+          {!offline && (
+            <button
+              onClick={() => input.current?.click()}
+              className="ml-1 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--fg)] pr-4 pl-3 text-sm font-medium text-[var(--bg)]"
+            >
+              <Plus className="h-4 w-4" /> Add books
+            </button>
+          )}
           <Account me={me} />
         </div>
         <input
@@ -125,9 +146,14 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
       </header>
 
       <main className="mx-auto max-w-6xl px-4 sm:px-8">
+        {offline && (
+          <p role="status" className="mb-6 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm">
+            Can’t reach the server. {books?.length ? "These are the books downloaded on this device." : "No books are downloaded on this device yet."}
+          </p>
+        )}
         {uploads.length > 0 && <Uploads uploads={uploads} onDismiss={(id) => setUploads((u) => u.filter((x) => x.id !== id))} />}
 
-        {books === undefined ? null : books === null || books.length === 0 ? (
+        {books === undefined || (offline && !books?.length) ? null : books === null || books.length === 0 ? (
           <Empty onAdd={() => input.current?.click()} />
         ) : (
           <>
@@ -138,7 +164,7 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
               </h2>
               <ul className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-x-5 gap-y-9 sm:grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] sm:gap-x-8">
                 {books.map((b) => (
-                  <ShelfBook key={b._id} book={b} />
+                  <ShelfBook key={b._id} book={b} offline={offline} />
                 ))}
               </ul>
             </section>
@@ -307,16 +333,23 @@ function ContinueReading({ book }: { book: Book }) {
   );
 }
 
-function ShelfBook({ book }: { book: Book }) {
+function ShelfBook({ book, offline }: { book: Book; offline: boolean }) {
   const remove = useMutation(api.books.remove);
   const [menu, setMenu] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [removeFailed, setRemoveFailed] = useState<string | null>(null);
   const state = readingState(book);
   const status = state === "new" ? "New" : state === "finished" ? "Finished" : pct(book.progress!.fraction);
 
   const doRemove = async () => {
-    await remove({ bookId: book._id });
-    void dropCached(book.sha256);
+    setRemoveFailed(null);
+    try {
+      await remove({ bookId: book._id });
+      void dropCached(book.sha256);
+    } catch (e) {
+      console.error(e);
+      setRemoveFailed(errorMessage(e));
+    }
   };
 
   return (
@@ -328,14 +361,14 @@ function ShelfBook({ book }: { book: Book }) {
       <div className="mt-0.5 flex items-center gap-2 text-sm text-[var(--muted)]">
         <span className="min-w-0 flex-1 truncate">{book.author || book.format.toUpperCase()}</span>
         <span className={state === "reading" ? "text-[var(--fg)]" : undefined}>{status}</span>
-        <button
+        {!offline && <button
           onClick={() => setMenu((m) => !m)}
           className="-mr-2 grid h-7 w-7 place-items-center rounded-full hover:bg-[var(--line)]"
           aria-label={`Options for ${book.title}`}
           aria-expanded={menu}
         >
           <More className="h-4 w-4" />
-        </button>
+        </button>}
       </div>
       {menu && (
         <>
@@ -344,6 +377,7 @@ function ShelfBook({ book }: { book: Book }) {
             {confirming ? (
               <>
                 <p className="leading-snug">Remove this book and its reading position from every device?</p>
+                {removeFailed && <p role="alert" className="mt-2 leading-snug text-[var(--ribbon)]">Couldn’t remove it. {removeFailed}</p>}
                 <div className="mt-3 flex gap-2">
                   <button onClick={() => void doRemove()} className="flex-1 rounded-lg bg-[var(--ribbon)] py-1.5 font-medium text-[var(--on-ribbon)]">
                     Remove

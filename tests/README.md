@@ -13,6 +13,8 @@ behaviour we want.
 | `word-span.json` | Which characters of a word are highlighted; punctuation-only "words" aren't |
 | `align.json` | Word timings from the voice model's output, recorded from Kokoro so no model is needed |
 | `stretch.json` | Speeding speech up or down: same pitch, right length, no clicks, fast enough |
+| `page-keys.json` | Which keys turn the page, and when they're left to the control they were pressed on |
+| `position.json` | Stories of reading across devices: what gets saved, what's offered, wrong clocks, sleeping tabs |
 
 `npm test` runs them against the TypeScript code (`spec.test.mjs` is the only TypeScript-specific
 part). They run before every deploy; a failure stops it. Another implementation (a Rust rewrite,

@@ -19,7 +19,10 @@ export function Harness({ name }: { name: string }) {
       bookId={`dev-${name}` as Id<"books">}
       book={book}
       remote={remote}
-      save={async (p) => void (w.harnessSaves as unknown[]).push(p)}
+      save={async (p) => {
+        (w.harnessSaves as unknown[]).push(p);
+        return { saved: true, now: Date.now() };
+      }}
     />
   );
 }

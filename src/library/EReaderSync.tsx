@@ -27,7 +27,8 @@ export function EReaderSync({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       setPassword((await createKey()).password);
-    } catch {
+    } catch (e) {
+      console.error(e);
       setError("The password could not be made. Try again.");
     } finally {
       setBusy(false);
