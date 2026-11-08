@@ -52,6 +52,10 @@ export interface Player {
 
 // How far ahead to synthesize, in seconds of speech at normal pace (about 14 MB as 16-bit audio).
 const AHEAD_SECONDS = 300;
+// Made speech kept for reuse, in seconds of audio (about 23 MB): what's ahead, and what was just
+// heard, so pausing, going back a sentence or starting again nearby doesn't make it all again.
+const KEEP_SECONDS = 480;
+const KEEP_BEHIND = 20; // sentences already heard that are kept
 // Sentences with the worker at once: one being made and one waiting, so it never sits idle.
 const IN_FLIGHT = 2;
 // After running out, wait until this much listening time is ready before carrying on.
@@ -101,16 +105,18 @@ export class KokoroPlayer implements Player {
   private totals = { audio: 0, gen: 0, chars: 0 };
   private recent: { audio: number; gen: number }[] = [];
 
-  // One play() run; results from an earlier run are dropped.
+  // One play() run; a load finishing for an earlier run is ignored.
   private run = 0;
   private nextId = 0;
-  private requests = new Map<number, { run: number; index: number; pace: number }>();
-  private results = new Map<number, Ready>();
+  // Sentences with the worker. Whatever comes back is kept, even after a restart.
+  private requests = new Map<number, { key: string; pace: number; chars: number }>();
+  // Made speech by voice and text, oldest first, so it's found again wherever playback restarts.
+  private made = new Map<string, Ready>();
+  private madeSeconds = 0;
   private sentences: Sentence[] = [];
   private voice = "af_heart";
   private rate = 1;
   private pace = 1; // of the sentence playing
-  private requested = 0; // next sentence to ask for
   private current = -1; // sentence in the audio element
   words: WordTiming[] = [];
   private url: string | null = null;
@@ -151,6 +157,10 @@ export class KokoroPlayer implements Player {
     } else if (msg.type === "error") {
       this.events.onError(msg.message);
       if (msg.id === undefined) this.events.onState("idle");
+      else this.requests.delete(msg.id);
+    } else if (msg.type === "skipped") {
+      this.requests.delete(msg.id);
+      this.request();
     } else {
       const req = this.requests.get(msg.id);
       this.requests.delete(msg.id);
@@ -161,7 +171,7 @@ export class KokoroPlayer implements Player {
       const gen = msg.genMs / 1000;
       this.totals.audio += spoken;
       this.totals.gen += gen;
-      if (req) this.totals.chars += this.sentences[req.index]?.text.length ?? 0;
+      if (req) this.totals.chars += req.chars;
       if (req && this.totals.chars) this.setStats({ charsPerSecond: this.totals.chars / this.totals.audio });
       // "Recent" speed: over about the last two minutes of speech, so it holds steady from one
       // sentence to the next (short ones carry more fixed overhead) yet follows real changes.
@@ -171,11 +181,43 @@ export class KokoroPlayer implements Player {
       const sum = (k: "audio" | "gen") => this.recent.reduce((a, r) => a + r[k], 0);
       const recent = this.recent.length ? sum("audio") / sum("gen") : spoken / gen;
       this.setStats({ speed: { last: spoken / gen, avg: this.totals.audio / this.totals.gen, recent } });
-      if (!req || req.run !== this.run) return;
-      this.results.set(req.index, { blob: wav(msg.samples, msg.sampleRate), seconds, pace, words: msg.words });
+      if (!req) return;
+      this.keep(req.key, { blob: wav(msg.samples, msg.sampleRate), seconds, pace, words: msg.words });
       this.reportAhead();
       this.request();
       if (this.waitingSince !== null) this.tryResume();
+    }
+  }
+
+  private key(i: number) {
+    return `${this.voice}\n${this.sentences[i].text}`;
+  }
+
+  /** Sentence `i` of what's being read, if it's been made in this voice. */
+  private madeFor(i: number) {
+    return i < this.sentences.length ? this.made.get(this.key(i)) : undefined;
+  }
+
+  /** Keep made speech; past the limit, drop the oldest that isn't just behind or ahead of playback. */
+  private keep(key: string, r: Ready) {
+    const old = this.made.get(key);
+    if (old) this.madeSeconds -= old.seconds;
+    this.made.delete(key);
+    this.made.set(key, r);
+    this.madeSeconds += r.seconds;
+    if (this.madeSeconds <= KEEP_SECONDS) return;
+    const wanted = new Set<string>();
+    let ahead = 0;
+    for (let i = Math.max(0, this.current - KEEP_BEHIND); i < this.sentences.length && ahead < AHEAD_SECONDS; i++) {
+      wanted.add(this.key(i));
+      const m = i > this.current ? this.madeFor(i) : undefined;
+      if (m) ahead += m.seconds * m.pace;
+    }
+    for (const [k, m] of this.made) {
+      if (this.madeSeconds <= KEEP_SECONDS) break;
+      if (wanted.has(k)) continue;
+      this.made.delete(k);
+      this.madeSeconds -= m.seconds;
     }
   }
 
@@ -192,7 +234,6 @@ export class KokoroPlayer implements Player {
     this.sentences = sentences;
     this.voice = voice;
     this.rate = rate;
-    this.requested = from;
     this.current = from - 1;
     this.events.onState("loading");
     await this.load();
@@ -201,7 +242,10 @@ export class KokoroPlayer implements Player {
     // Known to be slower than this speed (from earlier listening): get ahead before starting.
     this.rebuffering = (this.stats.speed?.recent ?? Infinity) < rate;
     this.request();
+    this.reportAhead();
     this.tick();
+    // What's already made from here on plays straight away.
+    this.tryResume();
   }
 
   setRate(rate: number) {
@@ -209,33 +253,40 @@ export class KokoroPlayer implements Player {
     this.audio.playbackRate = rate / this.pace;
   }
 
+  /** Speech made from the next sentence on, without a gap. */
   private reportAhead() {
     let seconds = 0;
-    for (const r of this.results.values()) seconds += r.seconds * r.pace;
-    const complete = this.requested >= this.sentences.length && this.requests.size === 0;
-    this.setStats({ ahead: { seconds, complete } });
+    let i = this.current + 1;
+    for (let r; (r = this.madeFor(i)); i++) seconds += r.seconds * r.pace;
+    this.setStats({ ahead: { seconds, complete: i >= this.sentences.length } });
   }
 
   /** Keep the worker busy until AHEAD_SECONDS of speech is ready beyond the sentence playing. */
   private request() {
+    if (!this.sentences.length || this.requests.size >= IN_FLIGHT) return;
+    const pending = new Set([...this.requests.values()].map((r) => r.key));
     let ahead = 0;
-    for (const r of this.results.values()) ahead += r.seconds * r.pace;
-    while (this.requested < this.sentences.length && this.requests.size < IN_FLIGHT && ahead < AHEAD_SECONDS) {
+    for (let i = this.current + 1; i < this.sentences.length && this.requests.size < IN_FLIGHT && ahead < AHEAD_SECONDS; i++) {
+      const made = this.madeFor(i);
+      if (made) ahead += made.seconds * made.pace;
+      const key = this.key(i);
+      if (made || pending.has(key)) continue;
       const id = this.nextId++;
       const pace = voicePace(this.rate);
-      this.requests.set(id, { run: this.run, index: this.requested, pace });
-      this.send({ type: "speak", id, text: this.sentences[this.requested].text, voice: this.voice, speed: pace });
-      this.requested++;
+      const text = this.sentences[i].text;
+      this.requests.set(id, { key, pace, chars: text.length });
+      pending.add(key);
+      this.send({ type: "speak", id, text, voice: this.voice, speed: pace });
     }
   }
 
   /** Waiting for synthesis: carry on once the next sentence is ready (after running out, once well ahead). */
   private tryResume() {
-    if (this.paused || !this.results.has(this.current + 1)) return;
+    if (this.paused || this.waitingSince === null || !this.madeFor(this.current + 1)) return;
     if (this.rebuffering) {
       let listening = 0;
       let i = this.current + 1;
-      for (let r; (r = this.results.get(i)); i++) listening += (r.seconds * r.pace) / this.rate;
+      for (let r; (r = this.madeFor(i)); i++) listening += (r.seconds * r.pace) / this.rate;
       if (listening < REBUFFER_SECONDS && i < this.sentences.length) return;
     }
     this.advance();
@@ -250,7 +301,7 @@ export class KokoroPlayer implements Player {
       this.events.onEnd?.();
       return;
     }
-    const r = this.results.get(next);
+    const r = this.madeFor(next);
     if (!r) {
       if (this.waitingSince === null) {
         this.waitingSince = performance.now();
@@ -268,9 +319,8 @@ export class KokoroPlayer implements Player {
     }
     this.waitingSince = null;
     this.rebuffering = false;
-    this.results.delete(next);
-    this.reportAhead();
     this.current = next;
+    this.reportAhead();
     this.words = r.words;
     this.shownWord = -1;
     this.pace = r.pace;
@@ -292,6 +342,8 @@ export class KokoroPlayer implements Player {
   }
 
   private tick = () => {
+    // Scheduled first, so a slip in highlighting one word can't stop it for good.
+    this.frame = requestAnimationFrame(this.tick);
     if (this.current >= 0 && this.waitingSince === null) {
       const t = this.audio.currentTime;
       let word = -1;
@@ -301,7 +353,6 @@ export class KokoroPlayer implements Player {
         this.events.onPosition(this.current, word);
       }
     }
-    this.frame = requestAnimationFrame(this.tick);
   };
 
   pause() {
@@ -323,14 +374,13 @@ export class KokoroPlayer implements Player {
     this.events.onState("playing");
   }
 
+  /** Stop playing. Speech already made, and the sentence being made, are kept for next time. */
   stop() {
     this.run++;
     this.send({ type: "cancel", below: this.nextId });
     cancelAnimationFrame(this.frame);
     clearTimeout(this.gapTimer);
     this.audio.pause();
-    this.results.clear();
-    this.requests.clear();
     this.waitingSince = null;
     this.rebuffering = false;
     this.paused = false;

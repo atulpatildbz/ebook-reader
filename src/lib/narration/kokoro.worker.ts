@@ -17,6 +17,8 @@ export type FromWorker =
   | { type: "progress"; loaded: number; total: number }
   | { type: "ready"; device: Device; dtype: string; ms: number }
   | { type: "audio"; id: number; samples: Float32Array; sampleRate: number; words: WordTiming[]; genMs: number }
+  /** A cancelled sentence, dropped without being made. */
+  | { type: "skipped"; id: number }
   | { type: "error"; id?: number; message: string };
 
 const post = (msg: FromWorker, transfer: Transferable[] = []) => self.postMessage(msg, { transfer });
@@ -55,7 +57,7 @@ async function load(device: Device, wanted?: Dtype) {
 }
 
 async function speak({ id, text, voice, speed }: Extract<ToWorker, { type: "speak" }>) {
-  if (id < cancelBelow) return;
+  if (id < cancelBelow) return post({ type: "skipped", id });
   if (!tts) throw new Error("Model not loaded");
   const t = performance.now();
   const audio = await tts.generate(text, { voice: voice as never, speed });

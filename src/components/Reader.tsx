@@ -106,6 +106,10 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
   const narrator = useRef<Narrator | null>(null);
   const [listening, setListening] = useState(false); // the read-aloud player is showing
   const [playerHeight, setPlayerHeight] = useState(0);
+  // Text selected in the book, for "Read from here". Kept a moment after the selection goes, as a
+  // tap on the button can clear it first.
+  const [picked, setPicked] = useState<Range | null>(null);
+  const pickTimer = useRef(0);
   const [reserved, setReserved] = useState(0); // px kept clear at the bottom of the page for the player
   const [narration, setNarration] = useState<NarrationState>({ status: "idle", engine: null, speed: null, ahead: null, left: null, stalls: 0, download: null, error: null });
 
@@ -260,6 +264,12 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
         doc.addEventListener("pointerdown", mark, { passive: true });
         doc.addEventListener("touchstart", mark, { passive: true });
         doc.addEventListener("wheel", mark, { passive: true });
+        doc.addEventListener("selectionchange", () => {
+          const sel = doc.getSelection();
+          window.clearTimeout(pickTimer.current);
+          if (sel && sel.rangeCount && sel.toString().trim()) setPicked(sel.getRangeAt(0).cloneRange());
+          else pickTimer.current = window.setTimeout(() => setPicked(null), 800);
+        });
         doc.addEventListener("click", (ev) => {
           if (ev.defaultPrevented || (ev.target as Element).closest?.("a") || doc.getSelection()?.toString()) return;
           const frame = doc.defaultView?.frameElement as HTMLElement | null;
@@ -660,6 +670,15 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
             else void n.play(settings.narrationVoice, settings.narrationRate);
           }}
           onSkip={(d) => narrator.current?.skip(d)}
+          onFromHere={
+            picked
+              ? () => {
+                  picked.startContainer.ownerDocument?.getSelection()?.removeAllRanges();
+                  setPicked(null);
+                  void narrator.current?.playFrom(picked, settings.narrationVoice, settings.narrationRate);
+                }
+              : undefined
+          }
           onRate={(r) => {
             setSettings({ narrationRate: r });
             narrator.current?.setRate(r);

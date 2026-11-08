@@ -67,6 +67,7 @@ export class Narrator {
   private lastStalls = 0;
   private turning = false; // a page turn or section change of our own is under way
   private userMovedAt = 0;
+  private movedWhilePaused = false;
   private color: string;
 
   constructor(
@@ -105,6 +106,7 @@ export class Narrator {
     this.userMovedAt = Date.now();
     // Moved to another section: what's being read is no longer on screen anywhere nearby.
     if (this.state.status === "playing" && this.section && d.section && d.section.current !== this.section.index) this.pause();
+    if (this.state.status === "paused") this.movedWhilePaused = true;
   };
 
   private async engine(): Promise<Player> {
@@ -144,22 +146,69 @@ export class Narrator {
     return this.player;
   }
 
-  /** Start reading at the top of the page on screen, or carry on if paused there. */
+  /**
+   * Carry on if paused, unless the reader has since moved to a page without that sentence; else
+   * start reading at the top of the page on screen.
+   */
   async play(voice: string, rate: number) {
-    this.voice = voice;
-    this.rate = rate;
-    this.stallBase = this.lastStalls;
-    this.set({ error: null, stalls: 0 });
-    // Paused with the sentence still on screen: carry on from it.
-    if (this.state.status === "paused" && this.player && this.onScreen()) {
+    this.begin(voice, rate);
+    const contents = this.renderer.getContents()[0];
+    if (!contents) return;
+    const same = this.useSection(contents);
+    if (same && this.state.status === "paused" && this.player && this.sentence >= 0 && (!this.movedWhilePaused || this.visible(this.sentence))) {
       if (this.voice === this.startedVoice) this.player.resume();
       else void this.start(this.sentence);
       return;
     }
-    const contents = this.renderer.getContents()[0];
-    if (!contents) return;
-    this.section = { index: contents.index, text: sectionText(contents.doc, this.opts.lang) };
     await this.start(this.firstOnScreen());
+  }
+
+  /** Read from the sentence where `range` (text the reader selected) begins. */
+  async playFrom(range: Range, voice: string, rate: number) {
+    this.begin(voice, rate);
+    const doc = range.startContainer.ownerDocument;
+    const contents = this.renderer.getContents().find((c) => c.doc === doc);
+    if (!contents) return;
+    this.useSection(contents);
+    const text = this.section!.text;
+    const pieces = text.pieces;
+    if (!pieces.length) return;
+    let i = 0;
+    for (; i < pieces.length; i++) {
+      const r = text.range(i);
+      try {
+        // The first piece that ends at or after the start of the selection.
+        if (range.comparePoint(r.endContainer, r.endOffset) >= 0) break;
+      } catch {
+        i = 0;
+        break;
+      }
+    }
+    this.userMovedAt = 0;
+    await this.start(Math.min(i, pieces.length - 1));
+  }
+
+  private begin(voice: string, rate: number) {
+    this.voice = voice;
+    this.rate = rate;
+    this.stallBase = this.lastStalls;
+    this.set({ error: null, stalls: 0 });
+  }
+
+  /**
+   * Make the section on screen the one being read. Returns whether it already was (if the reader
+   * left it and came back, its page has been laid out anew: the text is found again in that).
+   */
+  private useSection(contents: Contents): boolean {
+    if (this.section?.index === contents.index) {
+      if (this.section.text.doc !== contents.doc) {
+        this.section = { index: contents.index, text: sectionText(contents.doc, this.opts.lang) };
+        this.paintStyle(contents.doc);
+      }
+      return true;
+    }
+    this.section = { index: contents.index, text: sectionText(contents.doc, this.opts.lang) };
+    return false;
   }
 
   private async start(from: number): Promise<void> {
@@ -191,12 +240,13 @@ export class Narrator {
     return text.pieces.length;
   }
 
-  private onScreen(): boolean {
+  /** Whether any of piece `i` is on the page on screen. */
+  private visible(i: number): boolean {
     const visible = this.view.lastLocation?.range;
-    if (!visible || !this.section || this.sentence < 0) return false;
+    if (!visible || !this.section) return false;
     try {
-      const r = this.section.text.range(this.sentence);
-      return visible.comparePoint(r.startContainer, r.startOffset) === 0;
+      const r = this.section.text.range(i);
+      return visible.comparePoint(r.startContainer, r.startOffset) <= 0 && visible.comparePoint(r.endContainer, r.endOffset) >= 0;
     } catch {
       return false;
     }
@@ -244,12 +294,12 @@ export class Narrator {
     let wordRange: Range | null = null;
     if (word >= 0) {
       const m = [...piece.text.matchAll(/\S+/g)][word];
-      if (m) {
-        // Leave quotes and punctuation around the word out of its highlight.
-        const core = m[0].match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/u) ?? m;
-        const from = m.index! + (core.index ?? 0);
-        wordRange = text.range(sentence, from, from + core[0].length);
-      }
+      // Leave quotes and punctuation around the word out of its highlight.
+      const core = m?.[0].match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/u);
+      // A dash or "..." on its own isn't a word: leave the last one lit.
+      if (!m || !core) return;
+      const from = m.index! + core.index!;
+      wordRange = text.range(sentence, from, from + core[0].length);
     }
     this.highlight(text.doc, sentenceRange, wordRange);
     void this.follow(wordRange ?? sentenceRange);
@@ -305,6 +355,7 @@ export class Narrator {
 
   pause() {
     this.player?.pause();
+    this.movedWhilePaused = false;
   }
 
   /** Back or forward by sentences, within the section. */

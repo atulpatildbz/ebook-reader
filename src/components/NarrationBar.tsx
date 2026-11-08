@@ -39,6 +39,7 @@ export function NarrationBar({
   raised,
   onToggle,
   onSkip,
+  onFromHere,
   onRate,
   onVoice,
   onClose,
@@ -51,6 +52,8 @@ export function NarrationBar({
   raised: boolean;
   onToggle: () => void;
   onSkip: (delta: number) => void;
+  /** Text is selected in the book: offer to read from there. */
+  onFromHere?: () => void;
   onRate: (rate: number) => void;
   onVoice: (voice: string) => void;
   onClose: () => void;
@@ -100,6 +103,15 @@ export function NarrationBar({
       className="pointer-events-none absolute inset-x-0 z-30 flex flex-col items-center gap-1.5 px-3 transition-[bottom] duration-200"
       style={{ bottom: raised ? "calc(env(safe-area-inset-bottom) + 118px)" : "calc(env(safe-area-inset-bottom) + 4px)" }}
     >
+      {onFromHere && (
+        <button
+          onClick={onFromHere}
+          className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-full bg-[var(--ribbon)] px-4 text-sm font-medium text-[var(--on-ribbon)] shadow-lg"
+        >
+          <PlayIcon />
+          Read from here
+        </button>
+      )}
       {note && <p className="pointer-events-auto max-w-md rounded-2xl bg-[var(--surface)] px-3 py-1 text-center text-xs text-[var(--muted)] shadow">{note}</p>}
       {progress && (
         <p className="pointer-events-auto max-w-md rounded-full bg-[var(--surface)] px-3 py-1 text-center text-xs text-[var(--muted)] tabular-nums shadow" aria-live="off">
