@@ -2,25 +2,26 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { auth } from "./auth";
-import { sha256Hex } from "./kosync";
+import { keyHash } from "./kosync";
+import { KOSYNC_PATH } from "./shared";
 
 const http = httpRouter();
 auth.addHttpRoutes(http);
 
 // KOReader sync API, for e-readers (CrossPoint on the Xteink, or KOReader itself).
-// Server URL to give the device: https://<deployment>.convex.site/kosync
+// Server URL to give the device: https://<deployment>.convex.site/kosync (KOSYNC_PATH)
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/vnd.koreader.v1+json" } });
 
 const kosync = httpAction(async (ctx, req) => {
-  const path = new URL(req.url).pathname.replace(/^\/kosync/, "").replace(/\/+$/, "");
+  const path = new URL(req.url).pathname.slice(KOSYNC_PATH.length).replace(/\/+$/, "");
 
   // Accounts are made in Ribbon (Library → E-reader sync), not by devices.
   if (path === "/users/create") return json(402, { message: "Make the password in Ribbon: Library → E-reader sync" });
 
   const username = req.headers.get("x-auth-user") ?? "";
-  const key = (req.headers.get("x-auth-key") ?? "").toLowerCase();
-  const userId = username && key ? await ctx.runQuery(internal.kosync.authorize, { username, keyHash: await sha256Hex(key) }) : null;
+  const key = req.headers.get("x-auth-key") ?? "";
+  const userId = username && key ? await ctx.runQuery(internal.kosync.authorize, { username, keyHash: await keyHash(key) }) : null;
   if (!userId) return json(401, { message: "Unauthorized" });
 
   if (path === "/users/auth" && req.method === "GET") return json(200, { authorized: "OK" });
@@ -68,6 +69,6 @@ const kosync = httpAction(async (ctx, req) => {
   return json(404, { message: "Not found" });
 });
 
-for (const method of ["GET", "PUT", "POST"] as const) http.route({ pathPrefix: "/kosync/", method, handler: kosync });
+for (const method of ["GET", "PUT", "POST"] as const) http.route({ pathPrefix: `${KOSYNC_PATH}/`, method, handler: kosync });
 
 export default http;

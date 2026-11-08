@@ -1,10 +1,8 @@
 // The text of a laid-out book section, as paragraphs to narrate, with a way back from any stretch
 // of that text to a Range in the page (for highlighting it and turning to it).
+import { BLOCK_ELEMENTS, epubType, isHiddenNote } from "../html";
 import { splitPieces, type Piece } from "./sentences";
 
-const BLOCK = new Set(
-  "address article aside blockquote dd div dl dt figcaption figure footer h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section table td th tr ul".split(" "),
-);
 const SKIP = new Set(["script", "style", "noscript", "template", "head", "rt", "rp", "svg", "math", "nav"]);
 
 /** A table of contents or index laid out as a page: mostly links, not worth reading aloud. */
@@ -18,8 +16,7 @@ export function isMostlyLinks(doc: Document): boolean {
 
 /** Footnote markers ("¹", "[12]") aren't read aloud. */
 function isNoteRef(el: Element) {
-  const type = el.getAttributeNS("http://www.idpf.org/2007/ops", "type") ?? el.getAttribute("epub:type") ?? "";
-  if (/\bnoteref\b/.test(type) || /\bdoc-noteref\b/.test(el.getAttribute("role") ?? "")) return true;
+  if (epubType(el).includes("noteref") || /\bdoc-noteref\b/.test(el.getAttribute("role") ?? "")) return true;
   return el.localName === "sup" && !!el.querySelector("a") && (el.textContent ?? "").trim().length <= 4;
 }
 
@@ -61,8 +58,8 @@ export function sectionText(doc: Document, lang = "en"): SectionText {
     }
     if (n.nodeType !== Node.ELEMENT_NODE) return;
     const el = n as Element;
-    if (SKIP.has(el.localName) || isNoteRef(el)) return;
-    const block = BLOCK.has(el.localName) || el.localName === "br";
+    if (SKIP.has(el.localName) || isNoteRef(el) || isHiddenNote(el)) return;
+    const block = BLOCK_ELEMENTS.has(el.localName) || el.localName === "br";
     if (block) flush();
     for (const c of el.childNodes) walk(c);
     if (block) flush();

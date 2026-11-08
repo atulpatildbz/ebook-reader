@@ -93,7 +93,6 @@ export function alignWords(text: string, phonemes: string[], durations: number[]
 
   if (dp[n][m] >= INF) return proportional(written, spoken, seconds);
 
-  // Walk back from the full match, then hand out times.
   const steps: { i: number; j: number; mv: number }[] = [];
   for (let i = n, j = m; i > 0; ) {
     const mv = move[i][j];
@@ -113,7 +112,6 @@ export function alignWords(text: string, phonemes: string[], durations: number[]
   };
   for (const { i, j, mv } of steps) {
     if (mv === -1) {
-      // Split the shared spoken word between the pair by their expected lengths.
       const a = estimate(written[i].w) + 0.5;
       const b = estimate(written[i + 1].w) + 0.5;
       const { start, end } = spoken[j];

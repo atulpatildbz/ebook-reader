@@ -1,9 +1,13 @@
-import type { Settings } from "./settings";
-import { fontById, type Theme } from "./themes";
-import type { FoliateView } from "./foliate";
+import type { FoliateView } from "../lib/foliate";
+import type { Settings } from "../lib/settings";
+import { fontById, type Theme } from "../lib/themes";
+import { HIDDEN_NOTES_CSS } from "./html";
+
+/** Space the paginator leaves around the text, in px. */
+export const PAGE_MARGIN = 52;
 
 /** CSS injected into each chapter: [before the book's own CSS, after it]. */
-export function bookCSS(s: Settings, t: Theme): [string, string] {
+function bookCSS(s: Settings, t: Theme): [string, string] {
   const font = fontById(s.font);
   const before = font.google ? `@import url("https://fonts.googleapis.com/css2?family=${font.google}&display=swap");` : "";
   const textual = "p, li, blockquote, dd";
@@ -34,7 +38,7 @@ a:any-link { color: ${t.link} !important; text-decoration-color: color-mix(in sr
 ::selection { background: color-mix(in srgb, ${t.ribbon} 32%, transparent); }
 ${t.dark ? "img, svg, video { filter: brightness(0.82) contrast(1.05); }" : ""}
 pre { white-space: pre-wrap !important; }
-aside[epub|type~="endnote"], aside[epub|type~="footnote"], aside[epub|type~="note"], aside[epub|type~="rearnote"] { display: none; }
+${HIDDEN_NOTES_CSS}
 `;
   return [before, after];
 }
@@ -57,7 +61,7 @@ export function applyToView(view: FoliateView, s: Settings, t: Theme) {
   r.setAttribute("max-inline-size", `${s.width}px`);
   r.setAttribute("max-column-count", s.spread ? "2" : "1");
   r.setAttribute("gap", "6%");
-  r.setAttribute("margin", "52px");
+  r.setAttribute("margin", `${PAGE_MARGIN}px`);
   if (s.animated) r.setAttribute("animated", "");
   else r.removeAttribute("animated");
   r.setStyles?.(bookCSS(s, t));

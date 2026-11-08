@@ -23,7 +23,6 @@ function trim(p: string, s: number, e: number): [number, number] {
 
 function cut(p: string, s: number, e: number): [number, number][] {
   if (e - s <= MAX) return [[s, e]];
-  // Cut after the last ; : or , that leaves the first part under the limit, else at a space.
   const head = p.slice(s, s + MAX);
   let at = Math.max(head.lastIndexOf("; "), head.lastIndexOf(": "));
   if (at < MAX / 3) at = head.lastIndexOf(", ");

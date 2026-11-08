@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { themeById, type Theme } from "./themes";
+import { DEFAULT_VOICE } from "../reader/narration/voices";
 
 // Reading settings stay on the device: a phone and a laptop want different sizes and widths.
 export type Settings = {
@@ -29,7 +30,7 @@ export type Settings = {
   narrationRate: number;
 };
 
-export const DEFAULTS: Settings = {
+const DEFAULTS: Settings = {
   mode: "auto",
   dayTheme: "paper",
   nightTheme: "night",
@@ -46,7 +47,7 @@ export const DEFAULTS: Settings = {
   dim: 0,
   pdfZoom: "fit-page",
   copyPartWords: 2000,
-  narrationVoice: "af_heart",
+  narrationVoice: DEFAULT_VOICE,
   narrationRate: 1,
 };
 
@@ -72,6 +73,13 @@ export function setSettings(patch: Partial<Settings>) {
     /* private mode: settings last for this visit */
   }
   listeners.forEach((l) => l());
+}
+
+/** What "Reset text and layout" puts back. */
+const TEXT_AND_LAYOUT = ["font", "fontSize", "lineHeight", "width", "justify", "hyphenate", "flow", "spread", "animated", "publisherColors", "dim", "pdfZoom"] as const;
+
+export function resetTextAndLayout() {
+  setSettings(Object.fromEntries(TEXT_AND_LAYOUT.map((k) => [k, DEFAULTS[k]])));
 }
 
 window.addEventListener("storage", (e) => {

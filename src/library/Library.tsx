@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { ACCEPT, importBook } from "../lib/importBook";
 import { dropCached, persistStorage } from "../lib/bookCache";
+import { pct } from "../lib/format";
 import { openBook } from "../lib/route";
 import { setSettings, useTheme } from "../lib/settings";
-import { Moon, More, Plus, RibbonMark, Sun } from "./icons";
-import { ReaderSync } from "./ReaderSync";
+import { Moon, More, Plus, RibbonMark, Sun } from "../ui/icons";
+import { EReaderSync } from "./EReaderSync";
+import { ACCEPT, FORMAT_NAMES, importBook } from "./importBook";
 
-export type Book = NonNullable<ReturnType<typeof useQuery<typeof api.books.list>>>[number];
-type Me = { email: string; name: string; image: string | null };
+export type Book = NonNullable<FunctionReturnType<typeof api.books.list>>[number];
+type Me = NonNullable<FunctionReturnType<typeof api.books.me>>;
 type Upload = { id: number; name: string; stage: string; fraction?: number; error?: string; note?: string };
 
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
@@ -22,7 +23,11 @@ function ago(t: number) {
   return "just now";
 }
 
-const pct = (f: number) => `${Math.round(f * 100)}%`;
+/** Where the reader is with a book; under 0.1% is not started, from 99.5% on is done. */
+function readingState(b: Book): "new" | "reading" | "finished" {
+  const f = b.progress?.fraction ?? 0;
+  return f < 0.001 ? "new" : f >= 0.995 ? "finished" : "reading";
+}
 
 export function Library({ me }: { me: Me }) {
   return <LibraryView me={me} books={useQuery(api.books.list)} />;
@@ -57,7 +62,6 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
     }
   };
 
-  // Drop books anywhere on the page.
   useEffect(() => {
     let depth = 0;
     const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files");
@@ -83,7 +87,7 @@ export function LibraryView({ me, books }: { me: Me; books: Book[] | null | unde
     };
   });
 
-  const current = books?.find((b) => b.progress && b.progress.fraction < 0.995);
+  const current = books?.find((b) => b.progress && readingState(b) !== "finished");
 
   return (
     <div className="min-h-dvh pb-24" style={{ paddingTop: "env(safe-area-inset-top)" }}>
@@ -157,7 +161,7 @@ function Account({ me }: { me: Me }) {
   const [sync, setSync] = useState(false);
   return (
     <div className="relative ml-1">
-      {sync && <ReaderSync onClose={() => setSync(false)} />}
+      {sync && <EReaderSync onClose={() => setSync(false)} />}
       <button
         onClick={() => setOpen((o) => !o)}
         className="grid h-10 w-10 place-items-center overflow-hidden rounded-full border border-[var(--line)] bg-[var(--surface)] text-sm font-medium"
@@ -224,7 +228,7 @@ function Empty({ onAdd }: { onAdd: () => void }) {
       <RibbonMark className="mx-auto h-12 w-9 text-[var(--line)]" />
       <h1 className="mt-6 font-serif text-3xl font-medium tracking-tight">Your shelf is empty</h1>
       <p className="mt-3 leading-relaxed text-[var(--muted)]">
-        Add an EPUB, MOBI, AZW3 or PDF you own. It’s stored privately in your account, so you can open it on any device.
+        Add an {FORMAT_NAMES} you own. It’s stored privately in your account, so you can open it on any device.
       </p>
       <button onClick={onAdd} className="mt-8 inline-flex items-center gap-2 rounded-full bg-[var(--fg)] px-6 py-3 font-medium text-[var(--bg)]">
         <Plus className="h-4 w-4" /> Add books
@@ -236,7 +240,7 @@ function Empty({ onAdd }: { onAdd: () => void }) {
 
 function Cover({ book, className }: { book: Book; className?: string }) {
   const [failed, setFailed] = useState(false);
-  const inProgress = book.progress && book.progress.fraction > 0.001 && book.progress.fraction < 0.995;
+  const inProgress = readingState(book) === "reading";
   return (
     <div className={`relative aspect-[2/3] ${className ?? ""}`}>
       {book.coverUrl && !failed ? (
@@ -307,11 +311,11 @@ function ShelfBook({ book }: { book: Book }) {
   const remove = useMutation(api.books.remove);
   const [menu, setMenu] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const f = book.progress?.fraction ?? 0;
-  const status = !book.progress || f < 0.001 ? "New" : f >= 0.995 ? "Finished" : pct(f);
+  const state = readingState(book);
+  const status = state === "new" ? "New" : state === "finished" ? "Finished" : pct(book.progress!.fraction);
 
   const doRemove = async () => {
-    await remove({ bookId: book._id as Id<"books"> });
+    await remove({ bookId: book._id });
     void dropCached(book.sha256);
   };
 
@@ -323,7 +327,7 @@ function ShelfBook({ book }: { book: Book }) {
       </button>
       <div className="mt-0.5 flex items-center gap-2 text-sm text-[var(--muted)]">
         <span className="min-w-0 flex-1 truncate">{book.author || book.format.toUpperCase()}</span>
-        <span className={f > 0.001 && f < 0.995 ? "text-[var(--fg)]" : undefined}>{status}</span>
+        <span className={state === "reading" ? "text-[var(--fg)]" : undefined}>{status}</span>
         <button
           onClick={() => setMenu((m) => !m)}
           className="-mr-2 grid h-7 w-7 place-items-center rounded-full hover:bg-[var(--line)]"

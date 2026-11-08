@@ -1,36 +1,21 @@
 // The player shown while the book is being read aloud: back/forward a sentence, play/pause,
 // speed and voice. Floats above the page; moves up out of the way of the reader's footer.
 import { useEffect, useRef } from "react";
-import type { NarrationState } from "../lib/narration/narrator";
-import { REBUFFER_SECONDS } from "../lib/narration/kokoroPlayer";
-import { DEVICE_VOICE } from "../lib/narration/narrator";
-import { Close, PauseIcon, PlayIcon, SkipBack, SkipForward } from "./icons";
+import { duration } from "../../lib/format";
+import { Close, PauseIcon, PlayIcon, SkipBack, SkipForward } from "../../ui/icons";
+import type { NarrationState } from "./narrator";
+import { REBUFFER_SECONDS } from "./kokoroPlayer";
+import { DEVICE_VOICE, KOKORO_VOICES } from "./voices";
 
-// The better-rated English voices, best first (grades from the Kokoro model card).
-export const VOICES: [id: string, name: string][] = [
-  ["af_heart", "Heart (US)"],
-  ["af_bella", "Bella (US)"],
-  ["af_nicole", "Nicole (US, soft)"],
-  ["bf_emma", "Emma (UK)"],
-  ["am_fenrir", "Fenrir (US)"],
-  ["am_michael", "Michael (US)"],
-  ["am_puck", "Puck (US)"],
-  ["af_aoede", "Aoede (US)"],
-  ["af_kore", "Kore (US)"],
-  ["af_sarah", "Sarah (US)"],
-  ["bm_george", "George (UK)"],
-  ["bm_fable", "Fable (UK)"],
+const VOICES: [id: string, name: string][] = [
+  ...KOKORO_VOICES.map((v): [string, string] => [v.id, `${v.name} (${v.accent}${"note" in v ? `, ${v.note}` : ""})`]),
   [DEVICE_VOICE, "This device's voice"],
 ];
 
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
 
-/** A stretch of listening: "45 s", "3 min", "1 h 20 min". */
-export function duration(seconds: number) {
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
-  const min = Math.round(seconds / 60);
-  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
-}
+/** Gap between the player and the bottom edge of the screen, in px. */
+const BOTTOM = 4;
 
 export function NarrationBar({
   state,
@@ -43,7 +28,7 @@ export function NarrationBar({
   onRate,
   onVoice,
   onClose,
-  onHeight,
+  onRoom,
 }: {
   state: NarrationState;
   voice: string;
@@ -57,16 +42,16 @@ export function NarrationBar({
   onRate: (rate: number) => void;
   onVoice: (voice: string) => void;
   onClose: () => void;
-  /** The player's height in px, whenever it changes, so the page can end above it. */
-  onHeight: (px: number) => void;
+  /** How far up from the bottom edge the player reaches, in px, whenever that changes, so the page can end above it. */
+  onRoom: (px: number) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const heightRef = useRef(onHeight);
-  heightRef.current = onHeight;
+  const roomRef = useRef(onRoom);
+  roomRef.current = onRoom;
   useEffect(() => {
     const el = root.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => heightRef.current(el.offsetHeight));
+    const ro = new ResizeObserver(() => roomRef.current(el.offsetHeight + BOTTOM));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -85,7 +70,6 @@ export function NarrationBar({
   }
   if (error) note = `Narration stopped: ${error}`;
 
-  // Where listening stands: time left in the chapter at this speed, and how much is made ahead.
   const parts: string[] = [];
   const gettingAhead = status === "loading" && ahead !== null && (stalls > 0 || slow);
   if (gettingAhead) {
@@ -101,7 +85,7 @@ export function NarrationBar({
     <div
       ref={root}
       className="pointer-events-none absolute inset-x-0 z-30 flex flex-col items-center gap-1.5 px-3 transition-[bottom] duration-200"
-      style={{ bottom: raised ? "calc(env(safe-area-inset-bottom) + 118px)" : "calc(env(safe-area-inset-bottom) + 4px)" }}
+      style={{ bottom: `calc(env(safe-area-inset-bottom) + ${raised ? 118 : BOTTOM}px)` }}
     >
       {onFromHere && (
         <button

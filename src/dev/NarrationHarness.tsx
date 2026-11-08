@@ -2,9 +2,11 @@
 // device makes speech. No sign-in: http://localhost:5173/?harness=narration (also on the live site).
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApplyTheme, useTheme } from "../lib/settings";
-import { KokoroPlayer, type Stats } from "../lib/narration/kokoroPlayer";
-import { BrowserPlayer } from "../lib/narration/browserPlayer";
-import { splitPieces, type Piece } from "../lib/narration/sentences";
+import { KokoroPlayer } from "../reader/narration/kokoroPlayer";
+import { BrowserPlayer } from "../reader/narration/browserPlayer";
+import type { Player, Stats } from "../reader/narration/player";
+import { splitPieces, type Piece } from "../reader/narration/sentences";
+import { DEFAULT_VOICE, KOKORO_VOICES } from "../reader/narration/voices";
 
 const SAMPLE = `It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.
 
@@ -34,22 +36,6 @@ This was invitation enough.
 
 "Oh! Single, my dear, to be sure! A single man of large fortune; four or five thousand a year. What a fine thing for our girls!"`;
 
-// The better-rated English voices, best first (grades from the Kokoro model card).
-const KOKORO_VOICES = [
-  ["af_heart", "Heart · US woman · A"],
-  ["af_bella", "Bella · US woman · A-"],
-  ["af_nicole", "Nicole · US woman, soft · B-"],
-  ["bf_emma", "Emma · UK woman · B-"],
-  ["am_fenrir", "Fenrir · US man · C+"],
-  ["am_michael", "Michael · US man · C+"],
-  ["am_puck", "Puck · US man · C+"],
-  ["af_aoede", "Aoede · US woman · C+"],
-  ["af_kore", "Kore · US woman · C+"],
-  ["af_sarah", "Sarah · US woman · C+"],
-  ["bm_george", "George · UK man · C"],
-  ["bm_fable", "Fable · UK man · C"],
-] as const;
-
 type Engine = "webgpu" | "webgpu-fp16" | "wasm" | "browser";
 type State = "loading" | "playing" | "paused" | "idle";
 
@@ -60,7 +46,7 @@ export function NarrationHarness() {
   const [text, setText] = useState(SAMPLE);
   const [editing, setEditing] = useState(false);
   const [engine, setEngine] = useState<Engine>(hasWebGPU ? "webgpu" : "wasm");
-  const [voice, setVoice] = useState<string>("af_heart");
+  const [voice, setVoice] = useState(DEFAULT_VOICE);
   const [browserVoice, setBrowserVoice] = useState("");
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [rate, setRate] = useState(1);
@@ -86,7 +72,7 @@ export function NarrationHarness() {
   }, [pieces]);
 
   // One player per engine, kept so the Kokoro model loads only once.
-  const players = useRef(new Map<Engine, KokoroPlayer | BrowserPlayer>());
+  const players = useRef(new Map<Engine, Player>());
   const events = useMemo(
     () => ({
       onPosition: (sentence: number, word: number) => setPos({ sentence, word }),
@@ -126,9 +112,7 @@ export function NarrationHarness() {
   const playFrom = (from: number) => {
     setError(null);
     players.current.forEach((p, e) => e !== engine && p.stop());
-    const p = player(engine);
-    if (p instanceof BrowserPlayer) p.play(pieces, from, browserVoice, rate);
-    else void p.play(pieces, from, voice, rate);
+    void player(engine).play(pieces, from, engine === "browser" ? browserVoice : voice, rate);
   };
 
   const toggle = () => {
@@ -149,13 +133,7 @@ export function NarrationHarness() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, voice, browserVoice]);
 
-  // Kokoro changes speed on the fly; the built-in voice has to restart the sentence.
-  useEffect(() => {
-    const p = players.current.get(engine);
-    if (p instanceof KokoroPlayer) p.setRate(rate);
-    else if (p && (state === "playing" || state === "paused")) restartRef.current(Math.max(0, posRef.current.sentence));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rate]);
+  useEffect(() => players.current.get(engine)?.setRate(rate), [engine, rate]);
 
   const current = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
@@ -198,9 +176,9 @@ export function NarrationHarness() {
             </select>
           ) : (
             <select className={field} value={voice} onChange={(e) => setVoice(e.target.value)}>
-              {KOKORO_VOICES.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
+              {KOKORO_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {`${v.name} · ${v.accent} ${v.gender}${"note" in v ? `, ${v.note}` : ""} · ${v.grade}`}
                 </option>
               ))}
             </select>

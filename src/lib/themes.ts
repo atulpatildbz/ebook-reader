@@ -32,10 +32,10 @@ export const NIGHT_THEMES: Theme[] = [
   { id: "black", name: "Black", dark: true, bg: "#000000", fg: "#a3a3a3", muted: "#626262", surface: "#121212", line: "#262626", link: "#8ab0d8", ribbon: "#b8955a" },
 ];
 
-export const ALL_THEMES = [...DAY_THEMES, ...NIGHT_THEMES];
+const ALL_THEMES = [...DAY_THEMES, ...NIGHT_THEMES];
 export const themeById = (id: string) => ALL_THEMES.find((t) => t.id === id) ?? DAY_THEMES[0];
 
-export type Font = { id: string; name: string; stack: string; google?: string; note: string };
+type Font = { id: string; name: string; stack: string; google?: string; note: string };
 
 export const FONTS: Font[] = [
   { id: "original", name: "Book's own", stack: "", note: "As the publisher set it" },

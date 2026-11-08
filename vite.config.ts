@@ -38,6 +38,6 @@ export default defineConfig({
   base: process.env.BASE_PATH ?? "/",
   plugins: [serveFoliate(), react(), tailwindcss()],
   server: { port: 5173, strictPort: true },
-  // The narration worker (src/lib/narration) imports the voice model's runtime as ES modules.
+  // The narration worker (src/reader/narration) imports the voice model's runtime as ES modules.
   worker: { format: "es" },
 });

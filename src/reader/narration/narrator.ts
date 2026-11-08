@@ -1,10 +1,12 @@
 // Reads the open book aloud: from the top of the page on screen, a section at a time, with the
 // sentence and word being spoken highlighted in the page, pages turning to follow, and on into
 // the next section at the end of one.
-import type { FoliateView } from "../foliate";
+import type { FoliateView } from "../../lib/foliate";
 import { isMostlyLinks, sectionText, type SectionText } from "./bookText";
-import { KokoroPlayer, type Player, type Stats } from "./kokoroPlayer";
+import { KokoroPlayer } from "./kokoroPlayer";
 import { BrowserPlayer } from "./browserPlayer";
+import type { Player, Stats } from "./player";
+import { DEVICE_VOICE } from "./voices";
 
 export type NarrationStatus = "idle" | "loading" | "playing" | "paused";
 export type NarrationState = {
@@ -23,11 +25,7 @@ export type NarrationState = {
   error: string | null;
 };
 
-/** The voice id that means "this device's own voice" rather than a Kokoro voice. */
-export const DEVICE_VOICE = "device";
-
 type Contents = { index: number; doc: Document };
-type Renderer = { getContents(): Contents[]; scrollToAnchor(r: Range): Promise<void> };
 
 // One Kokoro model per page load, shared by every book opened.
 let kokoro: KokoroPlayer | null = null;
@@ -56,7 +54,7 @@ export class Narrator {
   private player: Player | null = null;
   private section: { index: number; text: SectionText } | null = null;
   private sentence = -1;
-  private voice = "af_heart";
+  private voice = "";
   private rate = 1;
   private startedVoice = ""; // the voice the current playback was started with
   private state: NarrationState = { status: "idle", engine: null, speed: null, ahead: null, left: null, stalls: 0, download: null, error: null };
@@ -90,7 +88,7 @@ export class Narrator {
   }
 
   private get renderer() {
-    return this.view.renderer as unknown as Renderer;
+    return this.view.renderer;
   }
 
   private set(s: Partial<NarrationState>) {
@@ -130,9 +128,8 @@ export class Narrator {
     if (this.voice === DEVICE_VOICE || !english || !(await hasGPU())) {
       if (!(this.player instanceof BrowserPlayer)) {
         this.player?.stop();
-        this.player = new BrowserPlayer(events);
+        this.player = new BrowserPlayer(events, this.opts.lang.split("-")[0] || "en");
       }
-      (this.player as BrowserPlayer).lang = this.opts.lang.split("-")[0] || "en";
       this.set({ engine: "device", ahead: null });
     } else {
       if (!(this.player instanceof KokoroPlayer)) {
@@ -177,7 +174,6 @@ export class Narrator {
     for (; i < pieces.length; i++) {
       const r = text.range(i);
       try {
-        // The first piece that ends at or after the start of the selection.
         if (range.comparePoint(r.endContainer, r.endOffset) >= 0) break;
       } catch {
         i = 0;
@@ -253,7 +249,7 @@ export class Narrator {
   }
 
   private async nextSection(): Promise<void> {
-    const sections = this.view.book.sections as { linear?: string; createDocument?: unknown }[];
+    const { sections } = this.view.book;
     let i = (this.section?.index ?? -1) + 1;
     while (i < sections.length && (sections[i].linear === "no" || !sections[i].createDocument)) i++;
     this.clearHighlight();

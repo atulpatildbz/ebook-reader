@@ -4,17 +4,24 @@
 import SparkMD5 from "spark-md5";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
-import { action, internalAction, internalMutation, internalQuery, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, query, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { allowedUser, emailAllowed } from "./auth";
+import { allowedUser, allowedUserById } from "./auth";
+import { findProgress, stored, writeProgress } from "./progress";
 
-export const md5Hex = (s: string) => SparkMD5.hash(s);
+const md5Hex = (s: string) => SparkMD5.hash(s);
 
-export async function sha256Hex(s: string) {
+async function sha256Hex(s: string) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/** What is stored for a device password: devices send MD5(password) as hex, kept as SHA-256 of that. */
+export const keyHash = (md5: string) => sha256Hex(md5.toLowerCase());
+
+/** Fraction apart within which an e-reader's report is the synced position echoed back, not reading on. */
+const ECHO_FRACTION = 0.002;
 
 /** KOReader's document id: MD5 of 1 KB read at offsets 0, 1 K, 4 K, 16 K, … 1 G (those inside the file). */
 async function partialMd5(file: Blob) {
@@ -103,17 +110,14 @@ export const createKey = action({
     }
     const password = raw.match(/.{4}/g)!.join("-");
     const username = usernameFor(email);
-    await ctx.runMutation(internal.kosync.storeKey, { userId, username, keyHash: await sha256Hex(md5Hex(password)) });
+    await ctx.runMutation(internal.kosync.storeKey, { userId, username, keyHash: await keyHash(md5Hex(password)) });
     return { username, password };
   },
 });
 
 export const allowedEmail = internalQuery({
   args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
-    const user = await ctx.db.get(userId);
-    return user && (await emailAllowed(ctx, user.email)) ? user.email! : null;
-  },
+  handler: async (ctx, { userId }) => (await allowedUserById(ctx, userId))?.email ?? null,
 });
 
 export const storeKey = internalMutation({
@@ -145,12 +149,11 @@ export const authorize = internalQuery({
       .withIndex("by_username", (q) => q.eq("username", username))
       .first();
     if (!key || key.keyHash !== keyHash) return null;
-    const user = await ctx.db.get(key.userId);
-    return user && (await emailAllowed(ctx, user.email)) ? user._id : null;
+    return (await allowedUserById(ctx, key.userId))?._id ?? null;
   },
 });
 
-async function findBook(ctx: { db: import("./_generated/server").QueryCtx["db"] }, userId: Id<"users">, document: string) {
+async function findBook(ctx: QueryCtx, userId: Id<"users">, document: string) {
   return (
     (await ctx.db
       .query("books")
@@ -167,40 +170,21 @@ export const getProgress = internalQuery({
   args: { userId: v.id("users"), document: v.string() },
   handler: async (ctx, { userId, document }) => {
     const book = await findBook(ctx, userId, document);
-    if (!book) return null;
-    return await ctx.db
-      .query("progress")
-      .withIndex("by_user_book", (q) => q.eq("userId", userId).eq("bookId", book._id))
-      .first();
+    return book && (await findProgress(ctx, userId, book._id));
   },
 });
 
-/** A position reported by an e-reader. Returns false when the book isn't in the library. */
+/** A position reported by an e-reader. One for a book not in the library is ignored. */
 export const putProgress = internalMutation({
   args: { userId: v.id("users"), document: v.string(), xpointer: v.string(), fraction: v.number(), device: v.string(), deviceName: v.string() },
   handler: async (ctx, { userId, document, xpointer, fraction, device, deviceName }) => {
     const book = await findBook(ctx, userId, document);
-    if (!book) return false;
-    const existing = await ctx.db
-      .query("progress")
-      .withIndex("by_user_book", (q) => q.eq("userId", userId).eq("bookId", book._id))
-      .first();
-    fraction = Math.max(0, Math.min(1, fraction));
+    if (!book) return;
+    const existing = await findProgress(ctx, userId, book._id);
+    const row = stored({ userId, bookId: book._id, cfi: "", xpointer, fraction, device, deviceName, updatedAt: Date.now() });
     // A device that just took the synced position reports it back in its own words; that is not
     // reading on, and must not prompt the other devices to "go there".
-    if (existing && existing.device !== device && Math.abs(existing.fraction - fraction) < 0.002) return true;
-    const row = {
-      userId,
-      bookId: book._id,
-      cfi: "",
-      xpointer: xpointer.slice(0, 2000),
-      fraction,
-      device: device.slice(0, 64),
-      deviceName: deviceName.slice(0, 64),
-      updatedAt: Date.now(),
-    };
-    if (existing) await ctx.db.replace(existing._id, row);
-    else await ctx.db.insert("progress", row);
-    return true;
+    if (existing && existing.device !== device && Math.abs(existing.fraction - row.fraction) < ECHO_FRACTION) return;
+    await writeProgress(ctx, existing, row);
   },
 });

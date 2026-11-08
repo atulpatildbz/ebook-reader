@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { useAction, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { Close } from "./icons";
+import { KOSYNC_PATH } from "../../convex/shared";
+import { copyText } from "../lib/clipboard";
+import { Close } from "../ui/icons";
 
 /** The KOReader sync API lives on the deployment's HTTP host (.convex.site, not .convex.cloud). */
-const serverUrl = `${String(import.meta.env.VITE_CONVEX_URL ?? "").replace(/\.convex\.cloud\/?$/, ".convex.site")}/kosync`;
+const serverUrl = `${String(import.meta.env.VITE_CONVEX_URL ?? "").replace(/\.convex\.cloud\/?$/, ".convex.site")}${KOSYNC_PATH}`;
 
 /** Setting up an e-reader (CrossPoint on the Xteink, or KOReader) to sync reading positions with Ribbon. */
-export function ReaderSync({ onClose }: { onClose: () => void }) {
+export function EReaderSync({ onClose }: { onClose: () => void }) {
   const account = useQuery(api.kosync.account);
   const createKey = useAction(api.kosync.createKey);
   const [password, setPassword] = useState<string | null>(null);
@@ -91,7 +93,7 @@ function Field({ label, value, note }: { label: string; value: string; note?: st
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {

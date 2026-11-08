@@ -1,24 +1,32 @@
 import type { ConvexReactClient } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { authors, loadFoliate, text } from "./foliate";
-import { putCached } from "./bookCache";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
+import { putCached } from "../lib/bookCache";
+import { authors, loadFoliate, text } from "../lib/foliate";
 
-export type Format = "epub" | "mobi" | "azw3" | "pdf" | "fb2" | "cbz";
+type Format = Doc<"books">["format"];
 
-export const ACCEPT = ".epub,.mobi,.azw3,.azw,.prc,.pdf,.fb2,.fbz,.cbz,application/epub+zip,application/pdf,application/x-mobipocket-ebook";
+/** File extensions and media types of each format the library takes. */
+const FORMATS = {
+  epub: { exts: ["epub"], types: ["application/epub+zip"] },
+  mobi: { exts: ["mobi", "prc"], types: ["application/x-mobipocket-ebook"] },
+  azw3: { exts: ["azw3", "azw"], types: [] },
+  pdf: { exts: ["pdf"], types: ["application/pdf"] },
+  fb2: { exts: ["fb2", "fbz"], types: [] },
+  cbz: { exts: ["cbz"], types: [] },
+} satisfies Record<Format, { exts: string[]; types: string[] }>;
+
+const entries = Object.entries(FORMATS) as [Format, { exts: string[]; types: string[] }][];
+
+/** For a file picker's `accept`. */
+export const ACCEPT = [...entries.flatMap(([, f]) => f.exts.map((e) => `.${e}`)), ...entries.flatMap(([, f]) => f.types)].join(",");
+
+/** "EPUB, MOBI, AZW3, PDF, FB2 or CBZ" */
+export const FORMAT_NAMES = new Intl.ListFormat("en", { type: "disjunction" }).format(entries.map(([f]) => f.toUpperCase()));
 
 function formatOf(file: File): Format | null {
   const ext = file.name.toLowerCase().split(".").pop() ?? "";
-  if (ext === "epub") return "epub";
-  if (ext === "mobi" || ext === "prc") return "mobi";
-  if (ext === "azw3" || ext === "azw") return "azw3";
-  if (ext === "pdf") return "pdf";
-  if (ext === "fb2" || ext === "fbz") return "fb2";
-  if (ext === "cbz") return "cbz";
-  if (file.type === "application/epub+zip") return "epub";
-  if (file.type === "application/pdf") return "pdf";
-  return null;
+  return (entries.find(([, f]) => f.exts.includes(ext)) ?? entries.find(([, f]) => f.types.includes(file.type)))?.[0] ?? null;
 }
 
 async function sha256(file: Blob) {
@@ -57,7 +65,7 @@ function upload(url: string, blob: Blob, onProgress?: (f: number) => void): Prom
   });
 }
 
-export type ImportResult = { bookId: Id<"books">; duplicate: boolean };
+type ImportResult = { bookId: Id<"books">; duplicate: boolean };
 
 export async function importBook(
   convex: ConvexReactClient,
@@ -65,7 +73,7 @@ export async function importBook(
   onStage: (stage: string, fraction?: number) => void,
 ): Promise<ImportResult> {
   const format = formatOf(file);
-  if (!format) throw new Error("Not a book file. Use EPUB, MOBI, AZW3, PDF, FB2 or CBZ.");
+  if (!format) throw new Error(`Not a book file. Use ${FORMAT_NAMES}.`);
 
   onStage("Reading");
   const sha = await sha256(file);

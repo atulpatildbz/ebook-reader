@@ -1,7 +1,7 @@
 // Dev-only: the library with made-up books (no sign-in). http://localhost:5173/?harness=library
 import { ConvexReactClient } from "convex/react";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { LibraryView, type Book } from "../components/Library";
+import { LibraryView, type Book } from "../library/Library";
 import { useApplyTheme, useTheme } from "../lib/settings";
 
 const hour = 3600_000;

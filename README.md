@@ -11,7 +11,7 @@ Sign-in is Google, limited to invited accounts (currently only atulpatildbz@gmai
   served as-is, not bundled, because it loads pdf.js, its worker and fonts relative to
   `import.meta.url` (`vite.config.ts` serves it raw in dev too). To update it, copy a newer
   checkout over that folder, minus `tests/`, `reader.*`, `ui/`, `rollup*` and `*.map`.
-- **Books**: on upload the browser reads title, author and cover (`src/lib/importBook.ts`), hashes
+- **Books**: on upload the browser reads title, author and cover (`src/library/importBook.ts`), hashes
   the file (SHA-256, so the same file is stored once), and puts the file and a small cover JPEG in
   Convex file storage, private to the account. Each browser keeps the books it has opened in
   IndexedDB (`src/lib/bookCache.ts`), so reopening is instant and works offline.
@@ -21,6 +21,10 @@ Sign-in is Google, limited to invited accounts (currently only atulpatildbz@gmai
   a book is open, a newer position from another device brings up a prompt (Go there / Stay here)
   rather than moving the page under you. Moves the reader didn't make, like a resize reflowing the
   text, are not saved. A position saved offline is pushed next time.
+- **E-reader sync**: e-readers that speak KOReader Sync (CrossPoint on the Xteink, KOReader) sync
+  positions through `https://<deployment>.convex.site/kosync` (`convex/http.ts`, `convex/kosync.ts`),
+  with a password made in Library → E-reader sync. Books are matched by file name or content hash,
+  and positions arrive as KOReader XPointers, turned into CFIs in the browser (`src/reader/xpointer.ts`).
 - **Reading settings** (theme, font, size, spacing, width, layout, dim) stay per device in
   `localStorage`: a phone and a laptop want different sizes. There are five day and five night
   themes; "Match system" switches between the chosen pair with the OS. PDFs are pictures of pages,
@@ -56,6 +60,8 @@ the toolbars, or swipe.
 
 ### Setting up a deployment
 
+`scripts/setup-prod.sh` does all of this for production in one go. By hand:
+
 1. `npx convex deploy` (prod) or `npx convex dev --once` (dev) to create it and push `convex/`.
 2. `node scripts/convex-keys.mjs --prod` (omit `--prod` for dev).
 3. `npx convex env set --prod SITE_URL https://atulpatildbz.github.io/ebook-reader`
@@ -72,15 +78,21 @@ the toolbars, or swipe.
     npx convex dev        # keeps convex/ pushed to the dev deployment
     npm run dev           # http://localhost:5173
 
-Without signing in, two dev-only pages (left out of production builds) help with the UI: put
-books in `dev-books/` (git-ignored) and open `http://localhost:5173/?harness=<file>` for the
-reader (`harnessRemote({...})` in the console fakes another device moving ahead), or
-`?harness=library` for the library with made-up books.
+Without signing in, dev-only pages (left out of production builds) help with the UI: put books in
+`dev-books/` (git-ignored) and open `http://localhost:5173/?harness=<file>` for the reader
+(`harnessRemote({...})` in the console fakes another device moving ahead), or `?harness=library`
+(or `library-empty`) for the library with made-up books. `?harness=narration`, also on the live
+site, tries the voices and measures how fast a device makes speech.
 
 `npm run typecheck` checks both the app and `convex/`.
 
+Code layout: `src/library/` (the shelf, adding books, e-reader sync setup), `src/reader/` (the book
+open, with its position sync in `position.ts`) and one folder per reader feature (`search/`,
+`copy/`, `narration/`); `src/lib/` and `src/ui/` hold what both sides share.
+
 ## Not yet
 
-- Kindle (needs a jailbreak) and Xteink devices: no browser to run this in.
-- Highlights, notes, bookmarks, search, dictionary: foliate-js supports them; not wired up yet.
+- Kindle (needs a jailbreak): no browser to run this in. (The Xteink has none either, but syncs its
+  position over KOReader Sync; see above.)
+- Highlights, notes, bookmarks, dictionary: foliate-js supports them; not wired up yet.
 - DRM-protected files can't be opened; only DRM-free copies work.

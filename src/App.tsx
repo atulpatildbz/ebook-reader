@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useConvexAuth, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "../convex/_generated/api";
+import { NOT_ALLOWED } from "../convex/shared";
 import { useApplyTheme, useTheme } from "./lib/settings";
 import { useRoute } from "./lib/route";
-import { Library } from "./components/Library";
-import { SyncedReader } from "./components/Reader";
-import { RibbonMark } from "./components/icons";
+import { Library } from "./library/Library";
+import { SyncedReader } from "./reader/Reader";
+import { RibbonMark } from "./ui/icons";
 
 function errorText(e: unknown) {
   return e instanceof Error ? `${e.message} ${String((e as { data?: unknown }).data ?? "")}` : String(e);
@@ -27,7 +28,7 @@ function useOAuthCode(onRefused: () => void) {
     (signIn as unknown as (p: undefined, o: { code: string }) => Promise<unknown>)(undefined, { code })
       .catch((e) => {
         console.error(e);
-        if (errorText(e).includes("not-allowed")) onRefused();
+        if (errorText(e).includes(NOT_ALLOWED)) onRefused();
       })
       .finally(() => setBusy(false));
   }, [signIn, onRefused]);

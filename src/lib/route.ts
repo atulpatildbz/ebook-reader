@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 // Hash routes (GitHub Pages has no server rewrites): "#/" is the library, "#/read/<bookId>" a book.
-export type Route = { name: "library" } | { name: "read"; bookId: string };
+type Route = { name: "library" } | { name: "read"; bookId: string };
 
 function parse(): Route {
   const m = location.hash.match(/^#\/read\/([^/?]+)/);

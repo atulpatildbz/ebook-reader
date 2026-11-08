@@ -1,6 +1,32 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 import { allowedUser, requireUser } from "./auth";
+import { ownBook } from "./books";
+
+type Position = Omit<Doc<"progress">, "_id" | "_creationTime">;
+
+export const findProgress = (ctx: QueryCtx, userId: Id<"users">, bookId: Id<"books">) =>
+  ctx.db
+    .query("progress")
+    .withIndex("by_user_book", (q) => q.eq("userId", userId).eq("bookId", bookId))
+    .first();
+
+/** A position as stored: fraction in 0–1, strings cut to size. */
+export const stored = (p: Position): Position => ({
+  ...p,
+  cfi: p.cfi.slice(0, 2000),
+  xpointer: p.xpointer?.slice(0, 2000),
+  fraction: Math.max(0, Math.min(1, p.fraction)),
+  chapter: p.chapter?.slice(0, 300),
+  device: p.device.slice(0, 64),
+  deviceName: p.deviceName.slice(0, 64),
+});
+
+export async function writeProgress(ctx: MutationCtx, existing: Doc<"progress"> | null, row: Position) {
+  if (existing) await ctx.db.replace(existing._id, row);
+  else await ctx.db.insert("progress", row);
+}
 
 /** The synced reading position of one book (live: updates when another device reads on). */
 export const get = query({
@@ -8,10 +34,7 @@ export const get = query({
   handler: async (ctx, { bookId }) => {
     const user = await allowedUser(ctx);
     if (!user) return null;
-    const row = await ctx.db
-      .query("progress")
-      .withIndex("by_user_book", (q) => q.eq("userId", user._id).eq("bookId", bookId))
-      .first();
+    const row = await findProgress(ctx, user._id, bookId);
     if (!row) return null;
     return {
       cfi: row.cfi,
@@ -39,32 +62,13 @@ export const save = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const book = await ctx.db.get(args.bookId);
-    if (!book || book.userId !== user._id) return false;
+    if (!(await ownBook(ctx, user._id, args.bookId))) return false;
     // A device with a clock far in the future must not pin the position forever.
-    const updatedAt = Math.min(args.updatedAt, Date.now() + 60_000);
-    const row = {
-      userId: user._id,
-      bookId: args.bookId,
-      cfi: args.cfi.slice(0, 2000),
-      xpointer: args.xpointer?.slice(0, 2000),
-      fraction: Math.max(0, Math.min(1, args.fraction)),
-      chapter: args.chapter?.slice(0, 300),
-      device: args.device.slice(0, 64),
-      deviceName: args.deviceName.slice(0, 64),
-      updatedAt,
-    };
-    const existing = await ctx.db
-      .query("progress")
-      .withIndex("by_user_book", (q) => q.eq("userId", user._id).eq("bookId", args.bookId))
-      .first();
-    if (!existing) {
-      await ctx.db.insert("progress", row);
-      return true;
-    }
-    if (existing.updatedAt > updatedAt) return false;
-    if (existing.cfi === row.cfi && existing.device === row.device) return true;
-    await ctx.db.replace(existing._id, row);
+    const row = stored({ ...args, userId: user._id, updatedAt: Math.min(args.updatedAt, Date.now() + 60_000) });
+    const existing = await findProgress(ctx, user._id, args.bookId);
+    if (existing && existing.updatedAt > row.updatedAt) return false;
+    if (existing && existing.cfi === row.cfi && existing.device === row.device) return true;
+    await writeProgress(ctx, existing, row);
     return true;
   },
 });

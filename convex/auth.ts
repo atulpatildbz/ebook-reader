@@ -1,7 +1,10 @@
 import { convexAuth, getAuthUserId } from "@convex-dev/auth/server";
 import Google from "@auth/core/providers/google";
 import { ConvexError } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
+import { emailAllowed } from "./allowlist";
+import { NOT_ALLOWED } from "./shared";
 
 const normalize = (url?: string) => (url ? url.replace(/\/$/, "") : null);
 
@@ -31,30 +34,21 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
     },
     // Only allowlisted accounts get a session.
     async beforeSessionCreation(ctx, { userId }) {
-      const user = await ctx.db.get(userId);
-      if (!(await emailAllowed(ctx as unknown as QueryCtx, user?.email))) {
-        throw new ConvexError("not-allowed");
-      }
+      if (!(await allowedUserById(ctx as unknown as QueryCtx, userId))) throw new ConvexError(NOT_ALLOWED);
     },
   },
 });
 
-export async function emailAllowed(ctx: QueryCtx, email?: string) {
-  if (!email) return false;
-  const row = await ctx.db
-    .query("allowedEmails")
-    .withIndex("by_email", (q) => q.eq("email", email.trim().toLowerCase()))
-    .first();
-  return row !== null;
+/** The user, if their email is (still) allowlisted. */
+export async function allowedUserById(ctx: QueryCtx, userId: Id<"users">) {
+  const user = await ctx.db.get(userId);
+  return user && (await emailAllowed(ctx, user.email)) ? user : null;
 }
 
 /** The signed-in user, if their email is (still) allowlisted. */
 export async function allowedUser(ctx: QueryCtx) {
   const userId = await getAuthUserId(ctx);
-  if (!userId) return null;
-  const user = await ctx.db.get(userId);
-  if (!user || !(await emailAllowed(ctx, user.email))) return null;
-  return user;
+  return userId ? allowedUserById(ctx, userId) : null;
 }
 
 export async function requireUser(ctx: QueryCtx) {

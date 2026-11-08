@@ -7,7 +7,7 @@
 // siblings; then the text run inside the last element and a character offset into it. Following
 // CrossPoint, text run k is the text after the element's (k-1)th child element, and offsets count
 // Unicode code points.
-import type { FoliateView } from "./foliate";
+import type { FoliateView } from "../lib/foliate";
 
 /** Where `range` starts, as an XPointer into spine item `index`. */
 export function toXPointer(index: number, range: Range): string | null {
@@ -23,7 +23,6 @@ export function toXPointer(index: number, range: Range): string | null {
   let element: Element | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
   let terminal = ".0";
   if (node.nodeType === Node.TEXT_NODE && element) {
-    // Run number: 1 + the child elements before this text; offset: code points since that point.
     let run = 1;
     let chars = 0;
     for (const sib of element.childNodes) {
@@ -65,7 +64,7 @@ function indexOfCodePoint(s: string, n: number) {
 
 type Parsed = { index: number; steps: { tag: string; n: number }[]; run: number; chars: number };
 
-export function parseXPointer(xp: string): Parsed | null {
+function parseXPointer(xp: string): Parsed | null {
   const m = xp.match(/^\/body\/DocFragment\[(\d+)\](?:\/body((?:\/[A-Za-z][\w:-]*(?:\[\d+\])?)*)(?:\/text\(\)(?:\[(\d+)\])?)?(?:\.(\d+))?)?$/);
   if (!m) return null;
   const steps = (m[2] ?? "")
@@ -79,7 +78,7 @@ export function parseXPointer(xp: string): Parsed | null {
 }
 
 /** The place an XPointer names, in a chapter document. Unresolvable steps stop at the last found. */
-export function resolveXPointer(doc: Document, p: Parsed): Range {
+function resolveXPointer(doc: Document, p: Parsed): Range {
   const range = doc.createRange();
   let el: Element = doc.body;
   let exact = true;
@@ -94,7 +93,6 @@ export function resolveXPointer(doc: Document, p: Parsed): Range {
   range.setStart(el, 0);
   if (!exact) return range;
 
-  // Skip to text run `run`, then `chars` code points along (into nested elements if need be).
   let start: Node | null = el.firstChild;
   for (let seen = 0; start && seen < p.run - 1; start = start.nextSibling) if (start.nodeType === Node.ELEMENT_NODE) seen++;
   if (!start) return range;
@@ -118,7 +116,7 @@ export function resolveXPointer(doc: Document, p: Parsed): Range {
 /** An XPointer from a device as a CFI for this book, or null if it can't be placed. */
 export async function xpointerToCFI(view: FoliateView, xp: string): Promise<string | null> {
   const p = parseXPointer(xp);
-  const section = p && (view.book.sections[p.index] as { createDocument?: () => Promise<Document> } | undefined);
+  const section = p && view.book.sections[p.index];
   if (!p || !section?.createDocument) return null;
   try {
     const doc = await section.createDocument();

@@ -1,34 +1,13 @@
 // The chapter being read as plain text, for copying out of the book: whole, or in parts small
 // enough for wherever it's pasted.
-import type { FoliateView, TocItem } from "./foliate";
+import { tocSection, type FoliateView, type TocItem } from "../../lib/foliate";
+import { BLOCK_ELEMENTS, isHiddenNote } from "../html";
 
-type Section = { id?: unknown; linear?: string; createDocument?: () => Promise<Document> };
-type Book = {
-  toc?: TocItem[];
-  sections: Section[];
-  splitTOCHref?: (href: string) => unknown;
-  getTOCFragment?: (doc: Document, fragment: unknown) => Element | null;
-};
-/** A table-of-contents entry resolved to its section and the anchor inside it, if any. */
 type Place = { index: number; fragment?: unknown };
 
 const flatten = (items?: TocItem[] | null): TocItem[] => (items ?? []).flatMap((it) => [it, ...flatten(it.subitems)]);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-async function resolve(book: Book, href?: string): Promise<Place | null> {
-  if (!href || !book.splitTOCHref) return null;
-  try {
-    const [id, fragment] = (await book.splitTOCHref(href)) as [unknown, unknown];
-    const index = book.sections.findIndex((s) => s.id === id);
-    return index < 0 ? null : { index, fragment: fragment ?? undefined };
-  } catch {
-    return null;
-  }
-}
-
-const BLOCK = new Set(
-  "address article aside blockquote dd div dl dt figcaption figure footer h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section table td th tr ul".split(" "),
-);
 const SKIP = new Set(["script", "style", "noscript", "template", "head"]);
 
 /** Paragraphs of text under `root`, one per block element; line breaks kept. */
@@ -46,12 +25,12 @@ function paragraphs(root: Node): string[] {
       return;
     }
     const name = (n as Element).localName;
-    if (SKIP.has(name)) return;
+    if (SKIP.has(name) || isHiddenNote(n as Element)) return;
     if (name === "br") {
       line += "\n";
       return;
     }
-    const block = BLOCK.has(name);
+    const block = BLOCK_ELEMENTS.has(name);
     if (block) flush();
     for (const c of n.childNodes) walk(c);
     if (block) flush();
@@ -66,15 +45,15 @@ function paragraphs(root: Node): string[] {
  * span several sections or be part of one. Without a usable entry, the current section.
  */
 export async function chapterText(view: FoliateView, tocItem: { href?: string } | null | undefined, section: number): Promise<string[]> {
-  const book = view.book as unknown as Book;
+  const book = view.book;
   const items = flatten(book.toc);
   const at = tocItem ? items.findIndex((it) => it === tocItem || it.href === tocItem.href) : -1;
 
-  let start = at >= 0 ? await resolve(book, items[at].href) : null;
+  let start = at >= 0 ? await tocSection(book, items[at].href) : null;
   let end: Place | null = null;
   if (start) {
     for (const it of items.slice(at + 1)) {
-      const p = await resolve(book, it.href);
+      const p = await tocSection(book, it.href);
       if (p && (p.index > start.index || (p.index === start.index && p.fragment !== undefined && !same(p.fragment, start.fragment)))) {
         end = p;
         break;
@@ -131,19 +110,4 @@ export function splitParts(paras: string[], maxWords: number): string[] {
   }
   flush();
   return parts;
-}
-
-/** Put text on the clipboard. Must run straight from a tap or click. */
-export async function copyText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
-  // No Clipboard API outside https (say, the dev server opened over the local network).
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.setAttribute("readonly", "");
-  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
-  document.body.append(ta);
-  ta.select();
-  const ok = document.execCommand("copy");
-  ta.remove();
-  if (!ok) throw new Error("Copy was blocked");
 }

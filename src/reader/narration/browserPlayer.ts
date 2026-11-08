@@ -1,6 +1,6 @@
 // The browser's own speech voices: the fallback where Kokoro can't run. Word positions come from
 // the browser's boundary events, which some voices never send.
-import type { Events, Player, Sentence } from "./kokoroPlayer";
+import type { Events, Player, Sentence } from "./player";
 
 // Sentences handed to the browser ahead of the one being spoken, so it goes straight from one to
 // the next instead of pausing while each is passed over (Android's voices take a moment to start).
@@ -14,10 +14,12 @@ export class BrowserPlayer implements Player {
   private voiceURI = "";
   private rate = 1;
   private paused = false;
-  /** Language of the text, for picking a voice when none is chosen. */
-  lang = "en";
 
-  constructor(public events: Events) {}
+  constructor(
+    public events: Events,
+    /** Language of the text, for picking a voice when none is chosen. */
+    private lang = "en",
+  ) {}
 
   play(sentences: Sentence[], from: number, voiceURI: string, rate: number) {
     this.stop();

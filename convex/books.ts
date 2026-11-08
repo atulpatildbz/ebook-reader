@@ -1,11 +1,19 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { requireUser, allowedUser } from "./auth";
 import { format } from "./schema";
 import { internal } from "./_generated/api";
 
-const MAX_BOOK_BYTES = 300 * 1024 * 1024;
+const MAX_BOOK_MB = 300;
+const MAX_BOOK_BYTES = MAX_BOOK_MB * 1024 * 1024;
 const MAX_COVER_BYTES = 2 * 1024 * 1024;
+
+/** The book, if it belongs to this user. */
+export async function ownBook(ctx: QueryCtx, userId: Id<"users">, bookId: Id<"books">) {
+  const book = await ctx.db.get(bookId);
+  return book && book.userId === userId ? book : null;
+}
 
 /** Who is signed in (null: nobody, or an account that is not allowed). */
 export const me = query({
@@ -61,9 +69,9 @@ export const list = query({
 export const get = query({
   args: { bookId: v.id("books") },
   handler: async (ctx, { bookId }) => {
-    const user = await requireUser(ctx);
-    const book = await ctx.db.get(bookId);
-    if (!book || book.userId !== user._id) return null;
+    const user = await allowedUser(ctx);
+    const book = user && (await ownBook(ctx, user._id, bookId));
+    if (!book) return null;
     return {
       _id: book._id,
       title: book.title,
@@ -120,7 +128,7 @@ export const create = mutation({
     };
     if (meta.size > MAX_BOOK_BYTES) {
       await discard();
-      throw new ConvexError("This file is larger than 300 MB");
+      throw new ConvexError(`This file is larger than ${MAX_BOOK_MB} MB`);
     }
     if (cover && (cover.size > MAX_COVER_BYTES || !cover.contentType?.startsWith("image/"))) {
       await ctx.storage.delete(args.coverId!);
@@ -152,23 +160,13 @@ export const create = mutation({
   },
 });
 
-export const rename = mutation({
-  args: { bookId: v.id("books"), title: v.string(), author: v.string() },
-  handler: async (ctx, { bookId, title, author }) => {
-    const user = await requireUser(ctx);
-    const book = await ctx.db.get(bookId);
-    if (!book || book.userId !== user._id) throw new ConvexError("Book not found");
-    await ctx.db.patch(bookId, { title: title.trim().slice(0, 500) || book.title, author: author.trim().slice(0, 300) });
-  },
-});
-
 /** Remove a book, its file, cover and reading position. */
 export const remove = mutation({
   args: { bookId: v.id("books") },
   handler: async (ctx, { bookId }) => {
     const user = await requireUser(ctx);
-    const book = await ctx.db.get(bookId);
-    if (!book || book.userId !== user._id) return;
+    const book = await ownBook(ctx, user._id, bookId);
+    if (!book) return;
     await ctx.storage.delete(book.fileId);
     if (book.coverId) await ctx.storage.delete(book.coverId);
     const progress = await ctx.db
