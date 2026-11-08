@@ -3,6 +3,7 @@
 // the next section at the end of one.
 import type { FoliateView } from "../../lib/foliate";
 import { isMostlyLinks, sectionText, type SectionText } from "./bookText";
+import { wordSpan } from "./sentences";
 import { KokoroPlayer } from "./kokoroPlayer";
 import { BrowserPlayer } from "./browserPlayer";
 import type { Player, Stats } from "./player";
@@ -58,6 +59,7 @@ export class Narrator {
   private player: Player | null = null;
   private section: { index: number; text: SectionText } | null = null;
   private sentence = -1;
+  private word: Range | null = null; // the word being read, highlighted
   private voice = "";
   private rate = 1;
   private startedVoice = ""; // the voice the current playback was started with
@@ -224,10 +226,9 @@ export class Narrator {
     void player.play(text.pieces, from, this.voice === DEVICE_VOICE ? "" : this.voice, this.rate);
   }
 
-  /** The first piece that starts on the page on screen. */
-  private firstOnScreen(): number {
+  /** The first piece of `text` (the section being read by default) that starts on the page on screen. */
+  private firstOnScreen(text = this.section?.text): number {
     const visible = this.view.lastLocation?.range;
-    const text = this.section?.text;
     if (!visible || !text) return 0;
     for (let i = 0; i < text.pieces.length; i++) {
       const r = text.range(i);
@@ -238,6 +239,44 @@ export class Narrator {
       }
     }
     return text.pieces.length;
+  }
+
+  /**
+   * Keep what's being read on screen through a change in the page's size (the player taking or
+   * giving back room): the page is laid out again around the word being read, or if nothing on
+   * screen is being read, the first sentence on screen. Call just before the change.
+   */
+  async holdPlace(): Promise<void> {
+    const contents = this.renderer.getContents()[0];
+    const visible = this.view.lastLocation?.range;
+    if (!contents || !visible) return;
+    const onScreen = (r: Range) => {
+      try {
+        return visible.comparePoint(r.startContainer, r.startOffset) === 0;
+      } catch {
+        return false;
+      }
+    };
+    let at: Range | null = null;
+    if (this.section?.text.doc === contents.doc && this.sentence >= 0) {
+      if (this.word && onScreen(this.word)) at = this.word;
+      else if (this.visible(this.sentence)) at = this.section.text.range(this.sentence);
+    }
+    if (!at) {
+      const text = this.section?.text.doc === contents.doc ? this.section.text : sectionText(contents.doc, this.opts.lang);
+      const i = this.firstOnScreen(text);
+      if (i < text.pieces.length) at = text.range(i);
+    }
+    if (!at || !onScreen(at)) return;
+    const point = at.cloneRange();
+    point.collapse(true);
+    // It's on this page already, so nothing moves; the page just remembers it.
+    this.turning = true;
+    try {
+      await this.renderer.scrollToAnchor(point);
+    } finally {
+      this.turning = false;
+    }
   }
 
   /** Whether any of piece `i` is on the page on screen. */
@@ -293,14 +332,12 @@ export class Narrator {
     const sentenceRange = text.range(sentence);
     let wordRange: Range | null = null;
     if (word >= 0) {
-      const m = [...piece.text.matchAll(/\S+/g)][word];
-      // Leave quotes and punctuation around the word out of its highlight.
-      const core = m?.[0].match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/u);
+      const span = wordSpan(piece.text, word);
       // A dash or "..." on its own isn't a word: leave the last one lit.
-      if (!m || !core) return;
-      const from = m.index! + core.index!;
-      wordRange = text.range(sentence, from, from + core[0].length);
+      if (!span) return;
+      wordRange = text.range(sentence, span[0], span[1]);
     }
+    this.word = wordRange;
     this.highlight(text.doc, sentenceRange, wordRange);
     void this.follow(wordRange ?? sentenceRange);
   }
@@ -386,6 +423,7 @@ export class Narrator {
     this.player?.stop();
     this.clearHighlight();
     this.sentence = -1;
+    this.word = null;
     this.set({ status: "idle", download: null, ahead: null, left: null });
   }
 

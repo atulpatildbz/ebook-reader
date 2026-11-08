@@ -6,6 +6,7 @@
 export type WordTiming = { charStart: number; charEnd: number; start: number; end: number };
 
 const LETTER = /[\p{L}\p{N}]/u;
+const ENDS_IN_LETTER = /[\p{L}\p{N}]$/u;
 // Phoneme characters that take no time of their own in a length estimate.
 const NOT_SOUND = /[ˈˌː\s"“”‘’,.;:!?—–\-()…]/u;
 
@@ -84,7 +85,9 @@ export function alignWords(text: string, phonemes: string[], durations: number[]
         }
         relax(i + 1, j + k, base + c, k);
       }
-      if (i + 1 < n && j < m && !silent && LETTER.test(written[i + 1].w)) {
+      // Words are only run together within a phrase: never across punctuation, which the voice
+      // pauses at (and keeps in the spoken word), as in "that it?” I".
+      if (i + 1 < n && j < m && !silent && ENDS_IN_LETTER.test(w) && LETTER.test(written[i + 1].w)) {
         const pair = est + estimate(written[i + 1].w);
         relax(i + 2, j + 1, base + Math.abs(Math.log((spoken[j].len + 1) / (pair + 1))) + 1, -1);
       }

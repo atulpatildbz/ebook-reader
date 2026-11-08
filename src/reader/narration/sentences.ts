@@ -53,3 +53,16 @@ export function splitPieces(paragraphs: string[], lang = "en"): Piece[] {
   });
   return out;
 }
+
+/**
+ * The part of the `word`th whitespace-separated word of `text` to highlight, as [start, end):
+ * the word without quotes or punctuation around it. Null for a "word" that's only punctuation
+ * (a dash, "..."), which isn't spoken as one.
+ */
+export function wordSpan(text: string, word: number): [number, number] | null {
+  const m = [...text.matchAll(/\S+/g)][word];
+  const core = m?.[0].match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/u);
+  if (!m || !core) return null;
+  const from = m.index! + core.index!;
+  return [from, from + core[0].length];
+}

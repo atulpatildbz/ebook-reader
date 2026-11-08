@@ -1,0 +1,161 @@
+{
+  "about": "Speeding speech up or slowing it down without changing its pitch. Input: a test tone (fundamental f0 Hz plus harmonics with the given amplitudes, loudness swelling at swellHz, normalized to peak 1) of `seconds` at `sampleRate`, and a speed factor (2 = twice as fast). Checks, measured away from the first and last 0.2 s: the output's length is the input's divided by the factor; its pitch (rising zero crossings per second) is f0; and its largest sample-to-sample jump is no bigger than the input's (no clicks at the joins). Also how long it may take.",
+  "tolerance": {
+    "lengthRatio": 0.01,
+    "pitchHz": 0.02,
+    "jump": 1.05
+  },
+  "maxMillisecondsPerSecondOfInput": 50,
+  "cases": [
+    {
+      "name": "120 Hz at 0.75×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 120,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 0.75
+    },
+    {
+      "name": "120 Hz at 1×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 120,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 1
+    },
+    {
+      "name": "120 Hz at 1.25×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 120,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 1.25
+    },
+    {
+      "name": "120 Hz at 1.6×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 120,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 1.6
+    },
+    {
+      "name": "120 Hz at 2.4×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 120,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 2.4
+    },
+    {
+      "name": "220 Hz at 0.75×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 220,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 0.75
+    },
+    {
+      "name": "220 Hz at 1×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 220,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 1
+    },
+    {
+      "name": "220 Hz at 1.25×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 220,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 1.25
+    },
+    {
+      "name": "220 Hz at 1.6×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 220,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 1.6
+    },
+    {
+      "name": "220 Hz at 2.4×",
+      "signal": {
+        "sampleRate": 24000,
+        "seconds": 3,
+        "f0": 220,
+        "harmonics": [
+          1,
+          0.5,
+          0.25
+        ],
+        "swellHz": 3
+      },
+      "factor": 2.4
+    }
+  ]
+}

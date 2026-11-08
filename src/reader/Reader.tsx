@@ -13,7 +13,7 @@ import { Back, Close, Contents, Copy, Headphones, Moon, Next, Prev, RibbonMark, 
 import { applyToView, PAGE_MARGIN } from "./bookStyles";
 import { ContentsPanel } from "./ContentsPanel";
 import { CopyPanel } from "./copy/CopyPanel";
-import { NarrationBar } from "./narration/NarrationBar";
+import { NarrationBar, narrationStatus } from "./narration/NarrationBar";
 import { useNarration } from "./narration/useNarration";
 import { Position, type Remote, type SavePosition } from "./position";
 import { SearchPanel } from "./search/SearchPanel";
@@ -240,9 +240,9 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
     setChrome(false);
     setPanel(null);
   };
-  // The book's area ends above the player. The paginator already leaves PAGE_MARGIN below the
-  // text; the player wants a little air above it.
-  const bookBottom = narration.room ? Math.max(0, narration.room + 10 - PAGE_MARGIN) : 0;
+  // The player sits in the PAGE_MARGIN the paginator leaves below the text. Only if it doesn't fit
+  // (very large system text, say) does the book's area end higher, which lays the page out again.
+  const bookBottom = Math.max(0, narration.room + 2 - PAGE_MARGIN);
 
   // Another device read on while this one is open: offer to jump there.
   useEffect(() => {
@@ -313,10 +313,12 @@ export function Reader({ bookId, book, remote, save }: { bookId: Id<"books">; bo
       {view && (
         <>
           <div
-            className={`pointer-events-none absolute inset-x-0 z-20 truncate px-16 text-center text-xs text-[var(--muted)] transition-opacity ${showChrome ? "opacity-0" : "opacity-100"}`}
+            className={`pointer-events-none absolute inset-x-0 z-20 truncate text-center text-xs text-[var(--muted)] tabular-nums transition-opacity ${narration.listening ? "px-6" : "px-16"} ${showChrome ? "opacity-0" : "opacity-100"}`}
             style={{ top: "calc(env(safe-area-inset-top) + 18px)" }}
+            aria-live="off"
           >
-            {fixed ? "" : chapter}
+            {/* While listening: how it stands, in place of the chapter. */}
+            {narration.listening ? narrationStatus(narration.state, narration.voice, narration.rate) : fixed ? "" : chapter}
           </div>
           <div
             className={`pointer-events-none absolute inset-x-0 z-20 flex justify-between px-6 text-xs text-[var(--muted)] tabular-nums transition-opacity sm:px-10 ${showChrome || narration.listening ? "opacity-0" : "opacity-100"}`}

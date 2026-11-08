@@ -144,7 +144,8 @@ export function NarrationHarness() {
   const field = "w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2";
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pt-6 pb-40">
+    // data-narration-state, data-sentence and data-spoken are what tests/browser reads: keep them.
+    <div className="mx-auto max-w-3xl px-4 pt-6 pb-40" data-narration-state={state}>
       <h1 className="font-serif text-2xl font-medium">Narration test</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Kokoro runs on this device; the first play downloads the voice model once. Tap any sentence to start there.
@@ -272,6 +273,8 @@ const Sentence = memo(function Sentence({
     <>
       <span
         ref={spanRef}
+        data-sentence={index}
+        data-spoken={active ? "sentence" : undefined}
         onClick={() => onPick(index)}
         className={`cursor-pointer rounded transition-colors ${active ? "bg-[color-mix(in_srgb,var(--ribbon)_12%,transparent)]" : "hover:bg-[var(--line)]/50"}`}
       >
@@ -280,7 +283,7 @@ const Sentence = memo(function Sentence({
               if (/^\s+$/.test(p) || !p) return p;
               w++;
               return (
-                <span key={i} className={w === word ? "rounded bg-[color-mix(in_srgb,var(--ribbon)_30%,transparent)]" : undefined}>
+                <span key={i} data-spoken={w === word ? "word" : undefined} className={w === word ? "rounded bg-[color-mix(in_srgb,var(--ribbon)_30%,transparent)]" : undefined}>
                   {p}
                 </span>
               );

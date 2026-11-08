@@ -1,0 +1,71 @@
+{
+  "about": "Which characters of the nth whitespace-separated word to highlight: the word without the quotes or punctuation around it, as [start, end) offsets in the text (UTF-16 code units). null for a word that is only punctuation (a dash, \"...\"), which isn't spoken as a word, so the previous word stays highlighted.",
+  "cases": [
+    {
+      "name": "quotes and punctuation are left out",
+      "text": "“Hello,” she said.",
+      "spans": [
+        [
+          1,
+          6
+        ],
+        [
+          9,
+          12
+        ],
+        [
+          13,
+          17
+        ]
+      ]
+    },
+    {
+      "name": "an ellipsis on its own isn't a word",
+      "text": "Well, yes, but ...",
+      "spans": [
+        [
+          0,
+          4
+        ],
+        [
+          6,
+          9
+        ],
+        [
+          11,
+          14
+        ],
+        null
+      ]
+    },
+    {
+      "name": "a dash on its own isn't a word",
+      "text": "It — was",
+      "spans": [
+        [
+          0,
+          2
+        ],
+        null,
+        [
+          5,
+          8
+        ]
+      ]
+    },
+    {
+      "name": "apostrophes and hyphens stay inside a word; brackets don't",
+      "text": "don't-stop (now)",
+      "spans": [
+        [
+          0,
+          10
+        ],
+        [
+          12,
+          15
+        ]
+      ]
+    }
+  ]
+}

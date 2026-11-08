@@ -51,16 +51,17 @@ export function useNarration(
 
   useEffect(() => narrator.current?.setColor(opts.color), [opts.color, view]);
 
-  // Room is made at once when the player grows, and given back only once it has stayed smaller for
-  // a while, so a passing message doesn't reflow the page twice.
+  // While listening, room is only ever added (to the most the player has needed), so messages
+  // coming and going don't lay the page out again each time; it's all given back on closing.
+  // Each change lays the page out again, around what's being read so it stays on screen.
   useEffect(() => {
-    const want = listening ? playerRoom : 0;
-    if (want >= room) {
-      if (want > room) setRoom(want);
-      return;
-    }
-    const t = window.setTimeout(() => setRoom(want), listening ? 4000 : 0);
-    return () => window.clearTimeout(t);
+    const want = listening ? Math.max(room, playerRoom) : 0;
+    if (want === room) return;
+    let cancelled = false;
+    void (narrator.current?.holdPlace() ?? Promise.resolve()).then(() => !cancelled && setRoom(want));
+    return () => {
+      cancelled = true;
+    };
   }, [listening, playerRoom, room]);
 
   return {

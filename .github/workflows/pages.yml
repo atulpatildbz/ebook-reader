@@ -26,6 +26,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The behaviour in tests/spec: a failure stops the deploy.
+      - run: npm test
       - run: npm run build
         env:
           VITE_CONVEX_URL: ${{ vars.CONVEX_URL }}

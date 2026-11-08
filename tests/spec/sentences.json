@@ -1,0 +1,166 @@
+{
+  "about": "Text to the pieces read aloud one at a time. Input: paragraphs (already whitespace-collapsed and trimmed), language \"en\". Output: each piece's text, its paragraph's index, whether it starts that paragraph, and its [start, end) character offsets in the paragraph (UTF-16 code units).",
+  "cases": [
+    {
+      "name": "abbreviations don't end a sentence",
+      "lang": "en",
+      "paragraphs": [
+        "Mr. Bennet replied that he had not. Dr. Smith, e.g. the third one, failed."
+      ],
+      "pieces": [
+        {
+          "text": "Mr. Bennet replied that he had not.",
+          "paragraph": 0,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 35
+        },
+        {
+          "text": "Dr. Smith, e.g. the third one, failed.",
+          "paragraph": 0,
+          "paragraphStart": false,
+          "start": 36,
+          "end": 74
+        }
+      ]
+    },
+    {
+      "name": "an ellipsis on its own ends a sentence, one inside doesn't",
+      "lang": "en",
+      "paragraphs": [
+        "Well, yes, but ... He left. I waited... and waited."
+      ],
+      "pieces": [
+        {
+          "text": "Well, yes, but ...",
+          "paragraph": 0,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 18
+        },
+        {
+          "text": "He left.",
+          "paragraph": 0,
+          "paragraphStart": false,
+          "start": 19,
+          "end": 27
+        },
+        {
+          "text": "I waited... and waited.",
+          "paragraph": 0,
+          "paragraphStart": false,
+          "start": 28,
+          "end": 51
+        }
+      ]
+    },
+    {
+      "name": "a question in quotes followed by a capital is split (known limitation: \"I asked\" is read as its own sentence)",
+      "lang": "en",
+      "paragraphs": [
+        "“Is that it?” I asked. She laughed."
+      ],
+      "pieces": [
+        {
+          "text": "“Is that it?”",
+          "paragraph": 0,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 13
+        },
+        {
+          "text": "I asked.",
+          "paragraph": 0,
+          "paragraphStart": false,
+          "start": 14,
+          "end": 22
+        },
+        {
+          "text": "She laughed.",
+          "paragraph": 0,
+          "paragraphStart": false,
+          "start": 23,
+          "end": 35
+        }
+      ]
+    },
+    {
+      "name": "each paragraph starts a new piece",
+      "lang": "en",
+      "paragraphs": [
+        "It was late.",
+        "Nobody came. The rain stopped."
+      ],
+      "pieces": [
+        {
+          "text": "It was late.",
+          "paragraph": 0,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 12
+        },
+        {
+          "text": "Nobody came.",
+          "paragraph": 1,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 12
+        },
+        {
+          "text": "The rain stopped.",
+          "paragraph": 1,
+          "paragraphStart": false,
+          "start": 13,
+          "end": 30
+        }
+      ]
+    },
+    {
+      "name": "a sentence over 280 characters is cut after a semicolon",
+      "lang": "en",
+      "paragraphs": [
+        "He walked for a long time through the forest, past the old temple where the priests had sung at dawn, past the river where the women washed their clothes and talked of the coming rains; then, as the sun went down behind the hills and the birds came home to the trees, he reached the edge of the city, tired and hungry and wondering whether anyone there would remember his name."
+      ],
+      "pieces": [
+        {
+          "text": "He walked for a long time through the forest, past the old temple where the priests had sung at dawn, past the river where the women washed their clothes and talked of the coming rains;",
+          "paragraph": 0,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 185
+        },
+        {
+          "text": "then, as the sun went down behind the hills and the birds came home to the trees, he reached the edge of the city, tired and hungry and wondering whether anyone there would remember his name.",
+          "paragraph": 0,
+          "paragraphStart": false,
+          "start": 186,
+          "end": 377
+        }
+      ]
+    },
+    {
+      "name": "text without letters is still a piece (the page reader drops such paragraphs before this)",
+      "lang": "en",
+      "paragraphs": [
+        "— * —",
+        "Then it began."
+      ],
+      "pieces": [
+        {
+          "text": "— * —",
+          "paragraph": 0,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 5
+        },
+        {
+          "text": "Then it began.",
+          "paragraph": 1,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 14
+        }
+      ]
+    }
+  ]
+}

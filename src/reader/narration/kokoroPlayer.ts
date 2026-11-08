@@ -151,7 +151,10 @@ export class KokoroPlayer implements Player {
       this.keep(req.key, { pcm, sampleRate: msg.sampleRate, seconds, pace, words: msg.words });
       this.reportAhead();
       this.request();
+      // Queue it straight away if it's next: waiting until the sentence playing ends would leave
+      // a gap while it's queued.
       if (this.waitingSince !== null) this.tryResume();
+      else if (this.slots.length) this.schedule();
     }
   }
 
