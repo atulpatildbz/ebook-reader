@@ -27,8 +27,12 @@ export type NarrationState = {
 
 type Contents = { index: number; doc: Document };
 
-// One Kokoro model per page load, shared by every book opened.
-let kokoro: KokoroPlayer | null = null;
+// One Kokoro model per page load, shared by every book opened. It's kept on the page rather than
+// in this module because in development an edit loads this module afresh: the copy before it is
+// shut down here, or each edit would leave another model loaded (a couple of gigabytes).
+const shared = globalThis as { ribbonKokoro?: KokoroPlayer | null };
+shared.ribbonKokoro?.dispose();
+shared.ribbonKokoro = null;
 let gpu: Promise<boolean> | null = null;
 const hasGPU = () =>
   (gpu ??= (async () => {
@@ -134,8 +138,8 @@ export class Narrator {
     } else {
       if (!(this.player instanceof KokoroPlayer)) {
         this.player?.stop();
-        kokoro ??= new KokoroPlayer("webgpu", events);
-        this.player = kokoro;
+        shared.ribbonKokoro ??= new KokoroPlayer("webgpu", events);
+        this.player = shared.ribbonKokoro;
       }
       this.player.events = events;
       this.set({ engine: "kokoro" });
