@@ -14,8 +14,8 @@ const VOICES: [id: string, name: string][] = [
 ];
 
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
-const MIN_RATE = 0.75;
-const MAX_RATE = 3;
+const MIN_RATE = RATES[0];
+const MAX_RATE = RATES[RATES.length - 1];
 const RATE_STEP = 0.05;
 /** The nearest speed on offer (and free of floating-point dust like 1.8000000000000003). */
 const tidyRate = (r: number) => Number(Math.min(MAX_RATE, Math.max(MIN_RATE, Math.round(r / RATE_STEP) * RATE_STEP)).toFixed(2));
@@ -28,19 +28,19 @@ const BOTTOM = 4;
  * page doesn't have to make room): time left at this speed and how much is made ahead, or what's
  * holding things up.
  */
-export function narrationStatus(state: NarrationState, voice: string, rate: number): string {
-  const { status, download, engine, error, speed, stalls, ahead, left } = state;
+export function narrationStatus(state: NarrationState, rate: number): string {
+  const { status, download, engine, fallback, error, speed, rebuffering, ahead, left } = state;
   if (error) return `Narration stopped: ${error}`;
   if (status === "loading" && download?.total) return `Downloading the voice, once: ${Math.round((download.loaded / download.total) * 100)}% of ${Math.round(download.total / 1e6)} MB`;
-  const slow = engine === "kokoro" && speed !== null && speed < rate;
-  if (status === "loading" && ahead !== null && (stalls > 0 || slow)) {
+  if (status === "loading" && ahead !== null && rebuffering) {
     // The fastest listed speed this device keeps up with, with a little to spare.
     const ok = speed !== null ? RATES.filter((r) => r <= speed * 0.9).at(-1) : undefined;
     return `Getting ahead: ${duration(ahead.seconds / rate)} of ${REBUFFER_SECONDS} s ready${ok ? ` · no stops at ${ok}×` : ""}`;
   }
   if (status === "loading") return "Starting…";
   const parts: string[] = [];
-  if (engine === "device" && voice !== DEVICE_VOICE) parts.push("Device voice (natural voices need WebGPU)");
+  if (fallback === "no-gpu") parts.push("Device voice (natural voices need WebGPU)");
+  if (fallback === "language") parts.push("Device voice (natural voices read English only)");
   if (left !== null) parts.push(`${duration(left / rate)} left in chapter at ${rate}×`);
   if (ahead !== null && engine === "kokoro") parts.push(ahead.complete ? "rest of chapter ready" : `${duration(ahead.seconds / rate)} ready ahead`);
   return parts.join(" · ");
@@ -50,7 +50,7 @@ export function NarrationBar({
   state,
   voice,
   rate,
-  raised,
+  above,
   onToggle,
   onSkip,
   onFromHere,
@@ -62,8 +62,8 @@ export function NarrationBar({
   state: NarrationState;
   voice: string;
   rate: number;
-  /** The reader's footer is showing: sit above it. */
-  raised: boolean;
+  /** Height in px of what the reader shows under the player (its footer), to sit above. */
+  above: number;
   onToggle: () => void;
   onSkip: (delta: number) => void;
   /** Text is selected in the book: offer to read from there. */
@@ -93,7 +93,7 @@ export function NarrationBar({
   return (
     <div
       className="pointer-events-none absolute inset-x-0 z-30 flex justify-center px-3 transition-[bottom] duration-200"
-      style={{ bottom: `calc(env(safe-area-inset-bottom) + ${raised ? 118 : BOTTOM}px)` }}
+      style={{ bottom: `calc(env(safe-area-inset-bottom) + ${BOTTOM + above}px)` }}
     >
       {/* Over the page rather than taking room from it: it's there only for a moment. */}
       {onFromHere && !speedOpen && (
@@ -152,7 +152,7 @@ export function NarrationBar({
   );
 }
 
-/** Any speed from 0.75× to 3×, in steps of 0.05: the slider and − + for exact ones, buttons for the usual ones. */
+/** Any speed on offer: the slider and − + for exact ones, buttons for the usual ones. */
 function SpeedPanel({ rate, onRate, onClose }: { rate: number; onRate: (rate: number) => void; onClose: () => void }) {
   const [shown, setShown] = useState(rate);
   const settle = useRef(0);

@@ -3,24 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import { text, type FoliateView } from "../../lib/foliate";
 import { setSettings, useSettings } from "../../lib/settings";
-import { Narrator, type NarrationState } from "./narrator";
+import { IDLE, Narrator } from "./narrator";
+import { DEFAULT_VOICE } from "./voices";
 
 export function useNarration(
   view: FoliateView | null,
   opts: {
     title: string;
     author: string;
-    color: string;
     /** Narration turns pages as it goes, which counts as reading: the position syncs. */
     onTurn: () => void;
     /** Whether the reader has just touched, scrolled or keyed. */
     userActive: () => boolean;
   },
 ) {
-  const { narrationVoice: voice, narrationRate: rate } = useSettings();
+  const { narrationVoice: voice = DEFAULT_VOICE, narrationRate: rate } = useSettings();
   const narrator = useRef<Narrator | null>(null);
   const [listening, setListening] = useState(false); // the player is showing
-  const [state, setState] = useState<NarrationState>({ status: "idle", engine: null, speed: null, ahead: null, left: null, stalls: 0, download: null, error: null });
+  const [state, setState] = useState(IDLE);
   const [playerRoom, setPlayerRoom] = useState(0);
   const [room, setRoom] = useState(0);
   const optsRef = useRef(opts);
@@ -36,7 +36,6 @@ export function useNarration(
         return optsRef.current.author;
       },
       lang: text(view.book.metadata?.language) || "en",
-      ribbon: optsRef.current.color,
       onChange: setState,
       onTurn: () => optsRef.current.onTurn(),
       userActive: () => optsRef.current.userActive(),
@@ -48,8 +47,6 @@ export function useNarration(
       setListening(false);
     };
   }, [view]);
-
-  useEffect(() => narrator.current?.setColor(opts.color), [opts.color, view]);
 
   // While listening, room is only ever added (to the most the player has needed), so messages
   // coming and going don't lay the page out again each time; it's all given back on closing.

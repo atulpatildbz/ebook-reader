@@ -1,7 +1,8 @@
 // Dev-only: the library with made-up books (no sign-in). http://localhost:5173/?harness=library
 import { ConvexReactClient } from "convex/react";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { LibraryView, type Book } from "../library/Library";
+import { LibraryView } from "../library/Library";
+import type { Book } from "../lib/shelf";
 import { useApplyTheme, useTheme } from "../lib/settings";
 
 const hour = 3600_000;
@@ -18,6 +19,7 @@ const books = [
   title,
   author,
   format: "epub",
+  fileName: `${title}.epub`,
   size: 2_400_000,
   sha256: ((i * 2654435761) >>> 0).toString(16).padStart(8, "0").split("").reverse().join("") + "0".repeat(56),
   addedAt: Date.now() - 1000 * hour - i,

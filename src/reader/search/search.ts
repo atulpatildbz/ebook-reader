@@ -2,6 +2,7 @@
 // from the printed text: capitals, accents, punctuation, curly vs straight quotes and line breaks
 // are all ignored. "dont you think its odd" finds "Don’t you think, it’s odd".
 import { foliateModule, tocSection, type FoliateView, type TocItem } from "../../lib/foliate";
+import { notText } from "../html";
 
 export type SearchHit = {
   cfi: string;
@@ -16,7 +17,12 @@ type Match = { range: Range; start: number; end: number; text: string };
 type TextWalker = (
   doc: Document,
   func: (strs: string[], makeRange: (si: number, so: number, ei: number, eo: number) => Range) => Generator<Match>,
+  filter: (node: Node) => number,
 ) => Generator<Match>;
+
+/** Search the text as copying and narration see it: not in code, styles or hidden notes. */
+const textNodes = (node: Node) =>
+  node.nodeType !== Node.ELEMENT_NODE ? NodeFilter.FILTER_ACCEPT : notText(node as Element) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
 
 const APOSTROPHES = /['‘’ʼ`´]/u;
 const WORD = /[\p{L}\p{N}]/u;
@@ -49,7 +55,10 @@ function normalize(text: string): { norm: string; map: number[] } {
   return { norm, map };
 }
 
-export const normalizeQuery = (q: string) => normalize(q).norm.trim();
+const normalizeQuery = (q: string) => normalize(q).norm.trim();
+
+/** Whether there's enough of a query to look for. */
+export const canSearch = (q: string) => normalizeQuery(q).length >= 2;
 
 const tidy = (s: string) => s.replace(/\s+/g, " ");
 
@@ -71,7 +80,6 @@ async function chapterLabels(view: FoliateView): Promise<string[]> {
   return labels;
 }
 
-/** At most this many matches are reported. */
 export const SEARCH_LIMIT = 300;
 
 /**
@@ -123,7 +131,7 @@ export async function searchBook(
         yield { range: makeRange(si, so, ei, eo + 1), start, end, text };
         at = norm.indexOf(needle, at + needle.length);
       }
-    });
+    }, textNodes);
     for (const { range, start, end, text } of matches) {
       const pre = tidy(text.slice(Math.max(0, start - 60), start)).trimStart();
       const post = tidy(text.slice(end, end + 60)).trimEnd();

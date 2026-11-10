@@ -1,5 +1,5 @@
 // Where the reader is in the book, kept in step across devices. Each move the reader makes is saved
-// in this browser at once and pushed to Convex 1.5 s after the page settles, and when the tab is
+// in this browser at once and pushed to Convex once the page settles, and when the tab is
 // hidden or closed. Moves the reader didn't make, like a resize reflowing the text, are not saved.
 // Times are on the server's clock as near as this device can tell, so a device whose clock is
 // wrong doesn't lose out to the others (or beat them).
@@ -7,6 +7,7 @@ import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { FoliateView, RelocateDetail, Target } from "../lib/foliate";
+import { readStored, writeStored } from "../lib/storage";
 import { deviceId, deviceName } from "./device";
 import { toXPointer, xpointerToCFI } from "./xpointer";
 
@@ -21,33 +22,13 @@ type Local = { cfi: string; xpointer?: string; fraction: number; chapter?: strin
 
 const key = (bookId: string) => `ribbon:pos:${bookId}`;
 
-function readLocal(bookId: string): Local | null {
-  try {
-    const raw = localStorage.getItem(key(bookId));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeLocal(bookId: string, p: Local) {
-  try {
-    localStorage.setItem(key(bookId), JSON.stringify(p));
-  } catch {
-    /* storage full or disabled */
-  }
-}
+const readLocal = (bookId: string) => readStored<Local>(key(bookId));
+const writeLocal = (bookId: string, p: Local) => writeStored(key(bookId), p);
 
 const CLOCK = "ribbon:clock-offset";
 
 /** How far this device's clock is behind the server's, in ms, as last measured. */
-function clockOffset() {
-  try {
-    return Number(localStorage.getItem(CLOCK)) || 0;
-  } catch {
-    return 0;
-  }
-}
+const clockOffset = () => Number(readStored<number>(CLOCK)) || 0;
 
 /** The time now, on the server's clock. */
 const now = () => Date.now() + clockOffset();
@@ -76,6 +57,8 @@ const FOLLOW_MS = 2000;
 const AWAY_MS = 60_000;
 /** Pages turned this soon after coming back may be turned on an out-of-date view of the book. */
 const JUST_BACK_MS = 120_000;
+/** Pushed this long after the last page turn. */
+const SETTLE_MS = 1500;
 /** A round trip longer than this says too little about the server's clock (the request sat queued). */
 const CLOCK_ROUND_TRIP_MS = 5000;
 
@@ -169,7 +152,7 @@ export class Position {
     this.last = { cfi: d.cfi, xpointer: xpointerOf(view, d), fraction: d.fraction, chapter, updatedAt: now(), pushed: false };
     writeLocal(this.bookId, this.last);
     window.clearTimeout(this.timer);
-    this.timer = window.setTimeout(this.push, 1500);
+    this.timer = window.setTimeout(this.push, SETTLE_MS);
     return true;
   }
 
@@ -263,13 +246,7 @@ export class Position {
         // Half the round trip ago, the server's clock said `serverNow`.
         const correction = back - sent < CLOCK_ROUND_TRIP_MS ? serverNow - (sent + back) / 2 - clockOffset() : 0;
         const wrongClock = Math.abs(correction) > 1000;
-        if (wrongClock) {
-          try {
-            localStorage.setItem(CLOCK, String(Math.round(clockOffset() + correction)));
-          } catch {
-            /* storage full or disabled */
-          }
-        }
+        if (wrongClock) writeStored(CLOCK, Math.round(clockOffset() + correction));
         if (this.last !== p) return;
         if (!saved && wrongClock) {
           // Refused as older only because this device's clock is wrong: try again with the right time.

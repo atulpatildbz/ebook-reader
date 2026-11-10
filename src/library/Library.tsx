@@ -1,20 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
-import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
 import { cachedHashes, dropCached, persistStorage } from "../lib/bookCache";
 import { errorMessage } from "../lib/errors";
 import { pct } from "../lib/format";
 import { openBook } from "../lib/route";
 import { setSettings, useTheme } from "../lib/settings";
-import { saveShelf, type Shelf } from "../lib/shelf";
+import { saveShelf, type Book, type Me, type Shelf } from "../lib/shelf";
 import { Moon, More, Plus, RibbonMark, Sun } from "../ui/icons";
 import { EReaderSync } from "./EReaderSync";
 import { ACCEPT, FORMAT_NAMES, importBook } from "./importBook";
 
-export type Book = NonNullable<FunctionReturnType<typeof api.books.list>>[number];
-type Me = NonNullable<FunctionReturnType<typeof api.books.me>>;
 type Upload = { id: number; name: string; stage: string; fraction?: number; error?: string; note?: string };
 
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
@@ -25,7 +22,6 @@ function ago(t: number) {
   return "just now";
 }
 
-/** Where the reader is with a book; under 0.1% is not started, from 99.5% on is done. */
 function readingState(b: Book): "new" | "reading" | "finished" {
   const f = b.progress?.fraction ?? 0;
   return f < 0.001 ? "new" : f >= 0.995 ? "finished" : "reading";

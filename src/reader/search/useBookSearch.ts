@@ -2,7 +2,7 @@
 // the others, and go back to where reading was if it was the wrong one.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { foliateModule, type FoliateView } from "../../lib/foliate";
-import { normalizeQuery, searchBook, type SearchHit } from "./search";
+import { canSearch, searchBook, type SearchHit } from "./search";
 
 export type SearchState = { query: string; hits: SearchHit[]; progress: number; running: boolean };
 
@@ -61,9 +61,8 @@ export function useBookSearch(
       abort.current = ctrl;
       setActive(null);
       unmark(); // nothing else can clear it once no match is active
-      const enough = normalizeQuery(query).length >= 2;
-      setState({ query, hits: [], progress: 0, running: enough });
-      if (!view || !enough) return;
+      setState({ query, hits: [], progress: 0, running: canSearch(query) });
+      if (!view || !canSearch(query)) return;
       searchBook(view, query, {
         signal: ctrl.signal,
         onHits: (hits) => !ctrl.signal.aborted && setState((s) => ({ ...s, hits: [...s.hits, ...hits] })),
@@ -109,3 +108,5 @@ export function useBookSearch(
 
   return { state, active, run, show, step, end, goBack, canGoBack: !!returnTo.current };
 }
+
+export type BookSearch = ReturnType<typeof useBookSearch>;

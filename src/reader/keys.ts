@@ -1,7 +1,7 @@
 // Which keys turn the page. Separate so the rules can be written down in tests/spec/page-keys.json.
 
 /** What the key was pressed on: the page itself, a button or link, or a control that uses keys. */
-export type KeyTarget = "page" | "button" | "field";
+type KeyTarget = "page" | "button" | "field";
 
 export function keyTarget(target: EventTarget | null): KeyTarget {
   const el = target as Partial<Element> | null;

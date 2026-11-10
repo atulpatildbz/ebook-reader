@@ -1,14 +1,12 @@
 // The chapter being read as plain text, for copying out of the book: whole, or in parts small
 // enough for wherever it's pasted.
 import { tocSection, type FoliateView, type TocItem } from "../../lib/foliate";
-import { BLOCK_ELEMENTS, isHiddenNote } from "../html";
+import { walkText } from "../html";
 
 type Place = { index: number; fragment?: unknown };
 
 const flatten = (items?: TocItem[] | null): TocItem[] => (items ?? []).flatMap((it) => [it, ...flatten(it.subitems)]);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-
-const SKIP = new Set(["script", "style", "noscript", "template", "head"]);
 
 /** Paragraphs of text under `root`, one per block element; line breaks kept. */
 function paragraphs(root: Node): string[] {
@@ -19,23 +17,11 @@ function paragraphs(root: Node): string[] {
     if (t) out.push(t);
     line = "";
   };
-  const walk = (n: Node) => {
-    if (n.nodeType === Node.TEXT_NODE) {
-      line += (n as Text).data.replace(/\s+/g, " ");
-      return;
-    }
-    const name = (n as Element).localName;
-    if (SKIP.has(name) || isHiddenNote(n as Element)) return;
-    if (name === "br") {
-      line += "\n";
-      return;
-    }
-    const block = BLOCK_ELEMENTS.has(name);
-    if (block) flush();
-    for (const c of n.childNodes) walk(c);
-    if (block) flush();
-  };
-  walk(root);
+  walkText(root, {
+    text: (t) => (line += t.data.replace(/\s+/g, " ")),
+    block: flush,
+    br: () => (line += "\n"),
+  });
   flush();
   return out;
 }

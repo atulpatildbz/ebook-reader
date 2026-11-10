@@ -1,19 +1,16 @@
 // A random id per browser (to tell this device's saved positions from others') and a readable
 // name for the "you were on page X on <device>" prompt.
+import { readText, writeText } from "../lib/storage";
 
 const KEY = "ribbon:device";
 
 export const deviceId: string = (() => {
-  try {
-    let id = localStorage.getItem(KEY);
-    if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem(KEY, id);
-    }
-    return id;
-  } catch {
-    return crypto.randomUUID();
+  let id = readText(KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    writeText(KEY, id);
   }
+  return id;
 })();
 
 export const deviceName: string = (() => {

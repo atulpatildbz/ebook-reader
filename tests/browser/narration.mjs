@@ -17,6 +17,7 @@
 // Runs on macOS; elsewhere memory is read from ps.
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -28,8 +29,18 @@ const arg = (name, fallback) => {
 };
 const MINUTES = Number(arg("minutes", 2.5));
 const RATE = 3;
-const PORT = 4174;
-const DEBUG_PORT = 9334;
+// Ports nothing else is using: another browser already on a fixed debugging port would be the one
+// driven (and heard) instead of the muted one started here.
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const srv = createServer().once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+const PORT = await freePort();
+const DEBUG_PORT = await freePort();
 const LIMITS = {
   memoryMB: Number(arg("memory-limit", 4500)), // voice loaded and playing; about 3 GB on an M-series Mac
   growth: 0.15, // while playing, after the first minute
@@ -95,7 +106,7 @@ async function until(what, fn, timeoutMs, everyMs = 500) {
 await until("the app", () => fetch(`http://localhost:${PORT}/`).then((r) => r.ok), 30000);
 const target = await until(
   "Chrome",
-  () => fetch(`http://localhost:${DEBUG_PORT}/json/list`).then((r) => r.json()).then((l) => l.find((t) => t.type === "page")),
+  () => fetch(`http://localhost:${DEBUG_PORT}/json/list`).then((r) => r.json()).then((l) => l.find((t) => t.type === "page" && t.url === "about:blank")),
   30000,
 );
 

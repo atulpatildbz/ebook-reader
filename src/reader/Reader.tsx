@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
@@ -10,19 +10,20 @@ import { openLibrary } from "../lib/route";
 import { setSettings, useSettings, useTheme } from "../lib/settings";
 import { readShelf } from "../lib/shelf";
 import { IconButton } from "../ui/controls";
-import { Back, Close, Contents, Copy, Headphones, Moon, Next, Prev, RibbonMark, Search, Sun, Type } from "../ui/icons";
-import { applyToView, PAGE_MARGIN } from "./bookStyles";
+import { Back, Contents, Copy, Headphones, Moon, RibbonMark, Search, Sun, Type } from "../ui/icons";
+import { applyLook, bookLook, PAGE_MARGIN } from "./bookStyles";
 import { ContentsPanel } from "./ContentsPanel";
 import { keyTarget, pageKey } from "./keys";
 import { CopyPanel } from "./copy/CopyPanel";
 import { NarrationBar, narrationStatus } from "./narration/NarrationBar";
 import { useNarration } from "./narration/useNarration";
 import { Position, type FreshPosition, type Remote, type SavePosition } from "./position";
+import { MatchBar } from "./search/MatchBar";
 import { SearchPanel } from "./search/SearchPanel";
 import { useBookSearch } from "./search/useBookSearch";
 import { SettingsPanel } from "./SettingsPanel";
 
-export type ReaderBook = Pick<NonNullable<FunctionReturnType<typeof api.books.get>>, "title" | "author" | "fileName" | "sha256" | "fileUrl">;
+type ReaderBook = Pick<NonNullable<FunctionReturnType<typeof api.books.get>>, "title" | "author" | "fileName" | "sha256" | "fileUrl">;
 
 /** How long to wait for the server before opening a book that's already on this device. */
 const SERVER_PATIENCE_MS = 1500;
@@ -95,16 +96,21 @@ export function Reader({
   const pickTimer = useRef(0);
 
   const host = useRef<HTMLDivElement>(null);
+  const [footerHeight, setFooterHeight] = useState(0);
+  const footer = useCallback((el: HTMLDivElement) => {
+    const ro = new ResizeObserver(() => setFooterHeight(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [position] = useState(() => new Position(bookId, save, fresh));
   position.save = save;
   position.fresh = fresh;
   // The open book reads the latest of these through refs, so a re-render never reopens it.
   const remoteRef = useRef(remote);
   remoteRef.current = remote;
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
-  const themeRef = useRef(theme);
-  themeRef.current = theme;
+  const look = useMemo(() => bookLook(settings, theme), [settings, theme]);
+  const lookRef = useRef(look);
+  lookRef.current = look;
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   const tapRef = useRef<(x: number) => void>(() => {});
 
@@ -112,7 +118,6 @@ export function Reader({
   const narration = useNarration(view, {
     title: book?.title ?? "",
     author: book?.author ?? "",
-    color: theme.ribbon,
     onTurn: () => position.narrationTurned(),
     userActive: () => position.userActedWithin(1500),
   });
@@ -140,7 +145,6 @@ export function Reader({
       cancelled = true;
     };
     // The file never changes for a book; a refreshed download URL is not a reason to reload.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book?.sha256, cacheBad]);
 
   useEffect(() => {
@@ -152,7 +156,7 @@ export function Reader({
   const navigate = useCallback(
     (dir: "left" | "right" | "next" | "prev") => {
       position.userActed();
-        const v = host.current?.querySelector("foliate-view") as FoliateView | null;
+      const v = host.current?.querySelector("foliate-view") as FoliateView | null;
       if (!v) return;
       setChrome(false);
       void (dir === "left" ? v.goLeft() : dir === "right" ? v.goRight() : dir === "next" ? v.next() : v.prev());
@@ -251,7 +255,7 @@ export function Reader({
 
       await v.open(file);
       if (cancelled) return;
-      applyToView(v, settingsRef.current, themeRef.current);
+      applyLook(v, lookRef.current);
       setToc(v.book.toc ?? []);
 
       const { target, from } = await position.start(v, remoteRef.current);
@@ -280,11 +284,11 @@ export function Reader({
     };
   }, [ready, file, position]);
 
-  // Each application lays the book out again, so only when something that affects it has changed.
-  const look = JSON.stringify([{ ...settings, narrationRate: 0, narrationVoice: "", copyPartWords: 0, dim: 0 }, theme]);
+  // Each application lays the book out again, so only when the look itself has changed.
+  const lookKey = JSON.stringify(look);
   useEffect(() => {
-    if (view) applyToView(view, settingsRef.current, themeRef.current);
-  }, [view, look]);
+    if (view) applyLook(view, lookRef.current);
+  }, [view, lookKey]);
 
   const listen = () => {
     narration.listen();
@@ -371,7 +375,7 @@ export function Reader({
             aria-live="off"
           >
             {/* While listening: how it stands, in place of the chapter. */}
-            {narration.listening ? narrationStatus(narration.state, narration.voice, narration.rate) : fixed ? "" : chapter}
+            {narration.listening ? narrationStatus(narration.state, narration.rate) : fixed ? "" : chapter}
           </div>
           <div
             className={`pointer-events-none absolute inset-x-0 z-20 flex justify-between px-6 text-xs text-[var(--muted)] tabular-nums transition-opacity sm:px-10 ${showChrome || narration.listening ? "opacity-0" : "opacity-100"}`}
@@ -429,7 +433,7 @@ export function Reader({
         className={`absolute inset-x-0 bottom-0 z-30 border-t border-[var(--line)] bg-[var(--surface)] transition-transform duration-200 ${showChrome && panel !== "settings" && panel !== "copy" ? "translate-y-0" : "translate-y-full"}`}
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="mx-auto max-w-3xl px-5 pt-3 pb-4">
+        <div ref={footer} className="mx-auto max-w-3xl px-5 pt-3 pb-4">
           <div className="flex items-baseline justify-between gap-4 text-sm">
             <span className="min-w-0 truncate">{chapter ?? book?.title}</span>
             <span className="shrink-0 text-[var(--muted)] tabular-nums">{loc ? pct(loc.fraction) : ""}</span>
@@ -470,37 +474,14 @@ export function Reader({
         />
       )}
 
-      {/* The match on screen: step through the others, or go back to where reading was. */}
-      {search.active !== null && panel !== "search" && (
-        <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center px-4" style={{ top: "calc(env(safe-area-inset-top) + 12px)" }}>
-          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[var(--line)] bg-[var(--surface)] py-1 pr-1 pl-2 text-sm shadow-lg">
-            <button onClick={() => setPanel("search")} className="rounded-full px-2 py-1.5 tabular-nums" title="Show all matches">
-              {search.active + 1} of {search.state.hits.length}
-            </button>
-            <IconButton label="Previous match" onClick={() => search.step(-1)}>
-              <Prev />
-            </IconButton>
-            <IconButton label="Next match" onClick={() => search.step(1)}>
-              <Next />
-            </IconButton>
-            {search.canGoBack && (
-              <button onClick={() => void search.goBack()} className="rounded-full px-3 py-1.5 text-[var(--muted)] hover:text-[var(--fg)]">
-                Go back
-              </button>
-            )}
-            <IconButton label="Done" onClick={search.end}>
-              <Close />
-            </IconButton>
-          </div>
-        </div>
-      )}
+      {panel !== "search" && <MatchBar search={search} onShowAll={() => setPanel("search")} />}
 
       {narration.listening && (
         <NarrationBar
           state={narration.state}
           voice={narration.voice}
           rate={narration.rate}
-          raised={showChrome && panel === null}
+          above={showChrome && panel === null ? footerHeight + 8 : 0}
           onToggle={narration.toggle}
           onSkip={narration.skip}
           onFromHere={

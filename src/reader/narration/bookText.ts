@@ -1,9 +1,10 @@
 // The text of a laid-out book section, as paragraphs to narrate, with a way back from any stretch
 // of that text to a Range in the page (for highlighting it and turning to it).
-import { BLOCK_ELEMENTS, epubType, isHiddenNote } from "../html";
+import { epubType, walkText } from "../html";
 import { splitPieces, type Piece } from "./sentences";
 
-const SKIP = new Set(["script", "style", "noscript", "template", "head", "rt", "rp", "svg", "math", "nav"]);
+/** Text that isn't read aloud: ruby glosses, pictures and formulas, navigation. */
+const UNSPOKEN = new Set(["rt", "rp", "svg", "math", "nav"]);
 
 /** A table of contents or index laid out as a page: mostly links, not worth reading aloud. */
 export function isMostlyLinks(doc: Document): boolean {
@@ -41,30 +42,19 @@ export function sectionText(doc: Document, lang = "en"): SectionText {
     if (/[\p{L}\p{N}]/u.test(cur.text)) paragraphs.push(cur);
     cur = { text: "", nodes: [], node: [], offset: [] };
   };
-  const walk = (n: Node) => {
-    if (n.nodeType === Node.TEXT_NODE) {
-      const t = n as Text;
-      const data = t.data;
-      let idx = -1;
-      for (let i = 0; i < data.length; i++) {
-        const space = /\s/.test(data[i]);
-        if (space && (cur.text === "" || cur.text.endsWith(" "))) continue;
-        if (idx < 0) idx = cur.nodes.push(t) - 1;
-        cur.text += space ? " " : data[i];
-        cur.node.push(idx);
-        cur.offset.push(i);
-      }
-      return;
+  const text = (t: Text) => {
+    const data = t.data;
+    let idx = -1;
+    for (let i = 0; i < data.length; i++) {
+      const space = /\s/.test(data[i]);
+      if (space && (cur.text === "" || cur.text.endsWith(" "))) continue;
+      if (idx < 0) idx = cur.nodes.push(t) - 1;
+      cur.text += space ? " " : data[i];
+      cur.node.push(idx);
+      cur.offset.push(i);
     }
-    if (n.nodeType !== Node.ELEMENT_NODE) return;
-    const el = n as Element;
-    if (SKIP.has(el.localName) || isNoteRef(el) || isHiddenNote(el)) return;
-    const block = BLOCK_ELEMENTS.has(el.localName) || el.localName === "br";
-    if (block) flush();
-    for (const c of el.childNodes) walk(c);
-    if (block) flush();
   };
-  if (doc.body) walk(doc.body);
+  if (doc.body) walkText(doc.body, { text, block: flush, br: flush }, (el) => UNSPOKEN.has(el.localName) || isNoteRef(el));
   flush();
 
   const pieces = splitPieces(paragraphs.map((p) => p.text), lang);

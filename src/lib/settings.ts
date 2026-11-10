@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { readStored, writeStored } from "./storage";
 import { themeById, type Theme } from "./themes";
-import { DEFAULT_VOICE } from "../reader/narration/voices";
 
 // Reading settings stay on the device: a phone and a laptop want different sizes and widths.
 export type Settings = {
@@ -22,18 +22,14 @@ export type Settings = {
   /** Extra darkening over the page, 0–0.6 (for bright screens at night). */
   dim: number;
   pdfZoom: "fit-page" | "fit-width";
-  /** Words per part when copying a chapter in parts. */
   copyPartWords: number;
-  /** Narration voice: a Kokoro voice id, or "device" for the system's own. */
-  narrationVoice: string;
-  /** Narration speed, 0.75–3. */
+  /** Narration voice (see reader/narration/voices.ts); unset for the default. */
+  narrationVoice?: string;
   narrationRate: number;
 };
 
-const DEFAULTS: Settings = {
-  mode: "auto",
-  dayTheme: "paper",
-  nightTheme: "night",
+/** What "Reset text and layout" puts back. */
+const TEXT_AND_LAYOUT = {
   font: "literata",
   fontSize: 19,
   lineHeight: 1.6,
@@ -46,41 +42,31 @@ const DEFAULTS: Settings = {
   publisherColors: false,
   dim: 0,
   pdfZoom: "fit-page",
+} satisfies Partial<Settings>;
+
+const DEFAULTS: Settings = {
+  mode: "auto",
+  dayTheme: "paper",
+  nightTheme: "night",
+  ...TEXT_AND_LAYOUT,
   copyPartWords: 2000,
-  narrationVoice: DEFAULT_VOICE,
   narrationRate: 1,
 };
 
 const KEY = "ribbon:settings";
 const listeners = new Set<() => void>();
 
-function read(): Settings {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? { ...DEFAULTS, ...JSON.parse(raw) } : DEFAULTS;
-  } catch {
-    return DEFAULTS;
-  }
-}
+const read = (): Settings => ({ ...DEFAULTS, ...readStored<Partial<Settings>>(KEY) });
 
 let current = read();
 
 export function setSettings(patch: Partial<Settings>) {
   current = { ...current, ...patch };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(current));
-  } catch {
-    /* private mode: settings last for this visit */
-  }
+  writeStored(KEY, current);
   listeners.forEach((l) => l());
 }
 
-/** What "Reset text and layout" puts back. */
-const TEXT_AND_LAYOUT = ["font", "fontSize", "lineHeight", "width", "justify", "hyphenate", "flow", "spread", "animated", "publisherColors", "dim", "pdfZoom"] as const;
-
-export function resetTextAndLayout() {
-  setSettings(Object.fromEntries(TEXT_AND_LAYOUT.map((k) => [k, DEFAULTS[k]])));
-}
+export const resetTextAndLayout = () => setSettings(TEXT_AND_LAYOUT);
 
 window.addEventListener("storage", (e) => {
   if (e.key === KEY) {
@@ -111,7 +97,6 @@ function useSystemDark() {
   return dark;
 }
 
-/** The theme in effect now: the day or night pick, by the mode (auto follows the system). */
 export function useTheme(): Theme {
   const s = useSettings();
   const systemDark = useSystemDark();

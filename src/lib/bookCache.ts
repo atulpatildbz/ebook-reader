@@ -8,7 +8,6 @@ export const getCached = (sha: string) => get<Blob>(sha, store).catch(() => unde
 export const putCached = (sha: string, blob: Blob) => set(sha, blob, store).catch(() => {});
 export const dropCached = (sha: string) => del(sha, store).catch(() => {});
 
-/** The hashes of every book kept on this device. */
 export const cachedHashes = () => keys<string>(store).catch(() => [] as string[]);
 
 export async function sha256(file: Blob) {

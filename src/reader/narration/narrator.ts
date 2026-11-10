@@ -1,7 +1,8 @@
 // Reads the open book aloud: from the top of the page on screen, a section at a time, with the
 // sentence and word being spoken highlighted in the page, pages turning to follow, and on into
 // the next section at the end of one.
-import type { FoliateView } from "../../lib/foliate";
+import type { FoliateView, RelocateDetail } from "../../lib/foliate";
+import { NARRATION_HIGHLIGHTS } from "../html";
 import { isMostlyLinks, sectionText, type SectionText } from "./bookText";
 import { wordSpan } from "./sentences";
 import { KokoroPlayer } from "./kokoroPlayer";
@@ -9,10 +10,12 @@ import { BrowserPlayer } from "./browserPlayer";
 import type { Player, Stats } from "./player";
 import { DEVICE_VOICE } from "./voices";
 
-export type NarrationStatus = "idle" | "loading" | "playing" | "paused";
+type NarrationStatus = "idle" | "loading" | "playing" | "paused";
 export type NarrationState = {
   status: NarrationStatus;
   engine: "kokoro" | "device" | null;
+  /** Why the device's voice is reading instead of the Kokoro voice chosen. */
+  fallback: "language" | "no-gpu" | null;
   /** How many times faster than real time this device makes Kokoro speech (recent sentences). */
   speed: number | null;
   /** Speech made ahead of what's playing, in seconds at normal pace (Kokoro only). */
@@ -21,10 +24,14 @@ export type NarrationState = {
   left: number | null;
   /** Times playback has waited for the next sentence since narration started. */
   stalls: number;
+  /** Ran out (or is known to be slower than this speed): waiting until well ahead to carry on. */
+  rebuffering: boolean;
   /** The voice model download, while it's under way. */
   download: { loaded: number; total: number } | null;
   error: string | null;
 };
+
+export const IDLE: NarrationState = { status: "idle", engine: null, fallback: null, speed: null, ahead: null, left: null, stalls: 0, rebuffering: false, download: null, error: null };
 
 type Contents = { index: number; doc: Document };
 
@@ -45,14 +52,19 @@ const hasGPU = () =>
     }
   })());
 
-const SENTENCE = "ribbon-narration-sentence";
-const WORD = "ribbon-narration-word";
 /** After the reader turns pages themselves, leave them there this long before following again. */
 const HANDS_OFF_MS = 8000;
 
-function rgba(hex: string, a: number) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+/**
+ * Where the start (or end) of `r` is relative to `area`: before (-1), inside (0) or after (1).
+ * Null when `r` is from a layout of the page since replaced (another document).
+ */
+function place(area: Range, r: Range, edge: "start" | "end" = "start"): number | null {
+  try {
+    return edge === "start" ? area.comparePoint(r.startContainer, r.startOffset) : area.comparePoint(r.endContainer, r.endOffset);
+  } catch {
+    return null;
+  }
 }
 
 export class Narrator {
@@ -63,7 +75,7 @@ export class Narrator {
   private voice = "";
   private rate = 1;
   private startedVoice = ""; // the voice the current playback was started with
-  private state: NarrationState = { status: "idle", engine: null, speed: null, ahead: null, left: null, stalls: 0, download: null, error: null };
+  private state = IDLE;
   // Characters per second of speech at normal pace: measured from Kokoro once it has spoken,
   // until then a typical narration pace.
   private cps = 14.5;
@@ -72,7 +84,6 @@ export class Narrator {
   private turning = false; // a page turn or section change of our own is under way
   private userMovedAt = 0;
   private movedWhilePaused = false;
-  private color: string;
   // Goes up whenever what should happen next changes (pause, close, a new start). Whatever was
   // waiting on something slow gives up if it finds this has moved on.
   private run = 0;
@@ -85,7 +96,6 @@ export class Narrator {
       /** The book's language; Kokoro reads English, others use the device's voice. */
       lang: string;
       author: string;
-      ribbon: string;
       onChange: (s: NarrationState) => void;
       /** Called before narration turns the page, so the move counts as reading. */
       onTurn: () => void;
@@ -93,12 +103,7 @@ export class Narrator {
       userActive: () => boolean;
     },
   ) {
-    this.color = opts.ribbon;
     view.addEventListener("relocate", this.onRelocate);
-  }
-
-  private get renderer() {
-    return this.view.renderer;
   }
 
   private set(s: Partial<NarrationState>) {
@@ -110,7 +115,7 @@ export class Narrator {
     // Our own turns, and relayouts nobody asked for (a resize, the player making room), aren't the
     // reader moving away.
     if (this.turning || this.state.status === "idle" || !this.opts.userActive()) return;
-    const d = (e as CustomEvent<{ section?: { current: number } }>).detail;
+    const d = (e as CustomEvent<RelocateDetail>).detail;
     this.userMovedAt = Date.now();
     // Moved to another section: what's being read is no longer on screen anywhere nearby.
     if ((this.state.status === "playing" || this.state.status === "loading") && this.section && d.section && d.section.current !== this.section.index) this.pause();
@@ -129,18 +134,19 @@ export class Narrator {
         if (st.ahead) this.set({ ahead: st.ahead });
         if (st.download && st.loadMs === undefined) this.set({ download: st.download });
         this.lastStalls = st.stalls.count;
+        if (st.rebuffering !== undefined) this.set({ rebuffering: st.rebuffering });
         if (st.speed) this.set({ speed: st.speed.recent, stalls: st.stalls.count - this.stallBase });
       },
       onError: (m: string) => this.fail(m),
       onEnd: () => void this.nextSection(),
     };
-    const english = /^en\b/i.test(this.opts.lang);
-    if (this.voice === DEVICE_VOICE || !english || !(await hasGPU())) {
+    const fallback = this.voice === DEVICE_VOICE ? null : !/^en\b/i.test(this.opts.lang) ? "language" : !(await hasGPU()) ? "no-gpu" : null;
+    if (this.voice === DEVICE_VOICE || fallback) {
       if (!(this.player instanceof BrowserPlayer)) {
         this.player?.stop();
         this.player = new BrowserPlayer(events, this.opts.lang.split("-")[0] || "en");
       }
-      this.set({ engine: "device", ahead: null });
+      this.set({ engine: "device", fallback, ahead: null, rebuffering: false });
     } else {
       if (!(this.player instanceof KokoroPlayer)) {
         this.player?.stop();
@@ -148,7 +154,7 @@ export class Narrator {
         this.player = shared.ribbonKokoro;
       }
       this.player.events = events;
-      this.set({ engine: "kokoro" });
+      this.set({ engine: "kokoro", fallback: null });
     }
     return this.player;
   }
@@ -159,7 +165,7 @@ export class Narrator {
    */
   async play(voice: string, rate: number) {
     this.begin(voice, rate);
-    const contents = this.renderer.getContents()[0];
+    const contents = this.view.renderer.getContents()[0];
     if (!contents) return;
     const same = this.useSection(contents);
     if (same && this.state.status === "paused" && this.player && this.handedOver && this.sentence >= 0 && (!this.movedWhilePaused || this.visible(this.sentence))) {
@@ -174,7 +180,7 @@ export class Narrator {
   async playFrom(range: Range, voice: string, rate: number) {
     this.begin(voice, rate);
     const doc = range.startContainer.ownerDocument;
-    const contents = this.renderer.getContents().find((c) => c.doc === doc);
+    const contents = this.view.renderer.getContents().find((c) => c.doc === doc);
     if (!contents) return;
     this.useSection(contents);
     const text = this.section!.text;
@@ -182,13 +188,9 @@ export class Narrator {
     if (!pieces.length) return;
     let i = 0;
     for (; i < pieces.length; i++) {
-      const r = text.range(i);
-      try {
-        if (range.comparePoint(r.endContainer, r.endOffset) >= 0) break;
-      } catch {
-        i = 0;
-        break;
-      }
+      const at = place(range, text.range(i), "end");
+      if (at === null) i = 0;
+      if (at === null || at >= 0) break;
     }
     this.userMovedAt = 0;
     await this.start(Math.min(i, pieces.length - 1));
@@ -209,7 +211,6 @@ export class Narrator {
     if (this.section?.index === contents.index) {
       if (this.section.text.doc !== contents.doc) {
         this.section = { index: contents.index, text: sectionText(contents.doc, this.opts.lang) };
-        this.paintStyle(contents.doc);
       }
       return true;
     }
@@ -226,12 +227,11 @@ export class Narrator {
     this.set({ status: "loading", ahead: null, left: this.leftFrom(from), error: null });
     this.sentence = from;
     this.startedVoice = this.voice;
-    this.paintStyle(text.doc);
     this.mediaSession();
     const player = await this.engine();
     if (run !== this.run) return;
     this.handedOver = true;
-    void player.play(text.pieces, from, this.voice === DEVICE_VOICE ? "" : this.voice, this.rate);
+    void player.play(text.pieces, from, player instanceof KokoroPlayer ? this.voice : "", this.rate);
   }
 
   /** The first piece of `text` (the section being read by default) that starts on the page on screen. */
@@ -239,12 +239,9 @@ export class Narrator {
     const visible = this.view.lastLocation?.range;
     if (!visible || !text) return 0;
     for (let i = 0; i < text.pieces.length; i++) {
-      const r = text.range(i);
-      try {
-        if (visible.comparePoint(r.startContainer, r.startOffset) >= 0) return i;
-      } catch {
-        return 0;
-      }
+      const at = place(visible, text.range(i));
+      if (at === null) return 0;
+      if (at >= 0) return i;
     }
     return text.pieces.length;
   }
@@ -255,16 +252,10 @@ export class Narrator {
    * screen is being read, the first sentence on screen. Call just before the change.
    */
   async holdPlace(): Promise<void> {
-    const contents = this.renderer.getContents()[0];
+    const contents = this.view.renderer.getContents()[0];
     const visible = this.view.lastLocation?.range;
     if (!contents || !visible) return;
-    const onScreen = (r: Range) => {
-      try {
-        return visible.comparePoint(r.startContainer, r.startOffset) === 0;
-      } catch {
-        return false;
-      }
-    };
+    const onScreen = (r: Range) => place(visible, r) === 0;
     let at: Range | null = null;
     if (this.section?.text.doc === contents.doc && this.sentence >= 0) {
       if (this.word && onScreen(this.word)) at = this.word;
@@ -281,7 +272,7 @@ export class Narrator {
     // It's on this page already, so nothing moves; the page just remembers it.
     this.turning = true;
     try {
-      await this.renderer.scrollToAnchor(point);
+      await this.view.renderer.scrollToAnchor(point);
     } finally {
       this.turning = false;
     }
@@ -290,13 +281,11 @@ export class Narrator {
   /** Whether any of piece `i` is on the page on screen. */
   private visible(i: number): boolean {
     const visible = this.view.lastLocation?.range;
-    if (!visible || !this.section) return false;
-    try {
-      const r = this.section.text.range(i);
-      return visible.comparePoint(r.startContainer, r.startOffset) <= 0 && visible.comparePoint(r.endContainer, r.endOffset) >= 0;
-    } catch {
-      return false;
-    }
+    if (!visible || !this.section || i >= this.section.text.pieces.length) return false;
+    const r = this.section.text.range(i);
+    const start = place(visible, r);
+    const end = place(visible, r, "end");
+    return start !== null && end !== null && start <= 0 && end >= 0;
   }
 
   private async nextSection(): Promise<void> {
@@ -319,7 +308,7 @@ export class Narrator {
       this.turning = false;
     }
     if (run !== this.run) return; // paused or closed while the chapter was opening
-    const contents = this.renderer.getContents()[0];
+    const contents = this.view.renderer.getContents()[0];
     if (!contents || contents.index !== i) return this.set({ status: "idle" });
     this.section = { index: i, text: sectionText(contents.doc, this.opts.lang) };
     if (isMostlyLinks(contents.doc)) return this.nextSection();
@@ -358,15 +347,14 @@ export class Narrator {
   private async follow(range: Range) {
     if (this.turning || Date.now() - this.userMovedAt < HANDS_OFF_MS) return;
     const visible = this.view.lastLocation?.range;
-    try {
-      if (visible && visible.comparePoint(range.startContainer, range.startOffset) === 0) return;
-    } catch {
-      return;
+    if (visible) {
+      const at = place(visible, range);
+      if (at === null || at === 0) return;
     }
     this.turning = true;
     this.opts.onTurn();
     try {
-      await this.renderer.scrollToAnchor(range);
+      await this.view.renderer.scrollToAnchor(range);
     } finally {
       this.turning = false;
     }
@@ -376,6 +364,7 @@ export class Narrator {
     const win = doc.defaultView as (Window & typeof globalThis) | null;
     const reg = win?.CSS?.highlights;
     if (!win || !reg || typeof win.Highlight !== "function") return;
+    const { sentence: SENTENCE, word: WORD } = NARRATION_HIGHLIGHTS;
     if (sentence) reg.set(SENTENCE, new win.Highlight(sentence));
     else reg.delete(SENTENCE);
     if (word) reg.set(WORD, new win.Highlight(word));
@@ -384,22 +373,6 @@ export class Narrator {
 
   private clearHighlight() {
     if (this.section) this.highlight(this.section.text.doc, null, null);
-  }
-
-  private paintStyle(doc: Document) {
-    let el = doc.getElementById("ribbon-narration") as HTMLStyleElement | null;
-    if (!el) {
-      el = doc.createElement("style");
-      el.id = "ribbon-narration";
-      (doc.head ?? doc.documentElement).append(el);
-    }
-    el.textContent = `::highlight(${SENTENCE}) { background-color: ${rgba(this.color, 0.13)}; }
-::highlight(${WORD}) { background-color: ${rgba(this.color, 0.32)}; }`;
-  }
-
-  setColor(ribbon: string) {
-    this.color = ribbon;
-    if (this.section) this.paintStyle(this.section.text.doc);
   }
 
   pause() {
@@ -414,10 +387,10 @@ export class Narrator {
   skip(delta: number) {
     if (!this.section || this.sentence < 0) return;
     this.userMovedAt = 0;
-    const here = this.renderer.getContents().find((c) => c.index === this.section!.index);
+    const here = this.view.renderer.getContents().find((c) => c.index === this.section!.index);
     if (!here) {
       // The reader has gone to another chapter (while paused): carry on from there.
-      const contents = this.renderer.getContents()[0];
+      const contents = this.view.renderer.getContents()[0];
       if (!contents) return;
       this.useSection(contents);
       void this.start(this.firstOnScreen());

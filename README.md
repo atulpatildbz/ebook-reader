@@ -10,7 +10,8 @@ Sign-in is Google, limited to invited accounts (currently only atulpatildbz@gmai
   ES modules in `public/foliate-js/` at the commit in `public/foliate-js/UPSTREAM_COMMIT`. It is
   served as-is, not bundled, because it loads pdf.js, its worker and fonts relative to
   `import.meta.url` (`vite.config.ts` serves it raw in dev too). To update it, copy a newer
-  checkout over that folder, minus `tests/`, `reader.*`, `ui/`, `rollup*` and `*.map`.
+  checkout over that folder, minus `tests/`, `reader.*`, `ui/`, `rollup*` and `*.map`, and check that
+  the `READER` list in `public/sw.js` (kept for reading offline) still names the modules it loads.
 - **Books**: on upload the browser reads title, author and cover (`src/library/importBook.ts`), hashes
   the file (SHA-256, so the same file is stored once), and puts the file and a small cover JPEG in
   Convex file storage, private to the account. Each browser keeps the books it has opened in

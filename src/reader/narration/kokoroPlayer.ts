@@ -88,7 +88,6 @@ export class KokoroPlayer implements Player {
   private current = -1; // sentence being heard (or last heard)
   private slots: Slot[] = []; // queued on the audio clock, in order; the first may be playing
   private waitingSince: number | null = null; // playback is waiting on synthesis
-  private rebuffering = false; // ran out mid-way: waiting to get well ahead
   private paused = false;
   private waking = false; // the audio is being started, so it may still report being stopped
   private failedInARow = 0;
@@ -189,7 +188,7 @@ export class KokoroPlayer implements Player {
       while (this.recent.length > 1 && this.recent.reduce((a, r) => a + r.audio, 0) - this.recent[0].audio >= 120) this.recent.shift();
       const sum = (k: "audio" | "gen") => this.recent.reduce((a, r) => a + r[k], 0);
       const recent = this.recent.length ? sum("audio") / sum("gen") : spoken / gen;
-      this.setStats({ speed: { last: spoken / gen, avg: this.totals.audio / this.totals.gen, recent } });
+      this.setStats({ speed: { avg: this.totals.audio / this.totals.gen, recent } });
       if (!req) return;
       const pcm = new Int16Array(msg.samples.length);
       for (let i = 0; i < pcm.length; i++) pcm[i] = Math.max(-1, Math.min(1, msg.samples[i])) * 0x7fff;
@@ -198,7 +197,6 @@ export class KokoroPlayer implements Player {
     }
   }
 
-  /** A sentence has just been made. */
   private madeOne() {
     this.reportAhead();
     this.request();
@@ -263,7 +261,7 @@ export class KokoroPlayer implements Player {
     await this.load();
     if (run !== this.run) return;
     // Known to be slower than this speed (from earlier listening): get ahead before starting.
-    this.rebuffering = (this.stats.speed?.recent ?? Infinity) < rate;
+    this.setStats({ rebuffering: (this.stats.speed?.recent ?? Infinity) < rate });
     this.request();
     this.reportAhead();
     this.tick();
@@ -315,7 +313,7 @@ export class KokoroPlayer implements Player {
   /** Waiting for synthesis: carry on once the next sentence is ready (after running out, once well ahead). */
   private tryResume() {
     if (this.paused || this.waitingSince === null || !this.madeFor(this.current + 1)) return;
-    if (this.rebuffering) {
+    if (this.stats.rebuffering) {
       let listening = 0;
       let i = this.current + 1;
       for (let r; (r = this.madeFor(i)); i++) listening += (r.seconds * r.pace) / this.rate;
@@ -324,7 +322,7 @@ export class KokoroPlayer implements Player {
       this.setStats({ stalls: { ...this.stats.stalls, seconds: this.stats.stalls.seconds + waited } });
     }
     this.waitingSince = null;
-    this.rebuffering = false;
+    if (this.stats.rebuffering) this.setStats({ rebuffering: false });
     this.schedule();
     this.events.onState("playing");
   }
@@ -392,10 +390,8 @@ export class KokoroPlayer implements Player {
     }
     this.schedule();
     if (this.slots.length) return;
-    // Ran out: wait until well ahead again.
     this.waitingSince = performance.now();
-    this.rebuffering = true;
-    this.setStats({ stalls: { ...this.stats.stalls, count: this.stats.stalls.count + 1 } });
+    this.setStats({ rebuffering: true, stalls: { ...this.stats.stalls, count: this.stats.stalls.count + 1 } });
     this.events.onState("loading");
   }
 
@@ -456,7 +452,7 @@ export class KokoroPlayer implements Player {
     this.clearSlots();
     this.media.pause();
     this.waitingSince = null;
-    this.rebuffering = false;
+    if (this.stats.rebuffering) this.setStats({ rebuffering: false });
     this.paused = false;
     this.current = -1;
   }

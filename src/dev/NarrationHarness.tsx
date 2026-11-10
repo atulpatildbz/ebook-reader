@@ -130,7 +130,6 @@ export function NarrationHarness() {
   posRef.current = pos;
   useEffect(() => {
     if (state === "playing" || state === "paused") restartRef.current(Math.max(0, posRef.current.sentence));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, voice, browserVoice]);
 
   useEffect(() => players.current.get(engine)?.setRate(rate), [engine, rate]);

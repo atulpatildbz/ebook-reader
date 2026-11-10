@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Drawer } from "../../ui/controls";
 import { Close, Search as SearchIcon } from "../../ui/icons";
-import { SEARCH_LIMIT } from "./search";
+import { canSearch, SEARCH_LIMIT } from "./search";
 import type { SearchState } from "./useBookSearch";
 
 export function SearchPanel({
@@ -34,7 +34,7 @@ export function SearchPanel({
   }, [text, state.query, onSearch]);
 
   const { hits, running, progress, query } = state;
-  const status = !query.trim()
+  const status = !canSearch(query)
     ? "Type a few words you heard or remember. Punctuation and capitals don’t matter."
     : running
       ? `Searching, ${Math.round(progress * 100)}%${hits.length ? `. ${hits.length} found so far` : ""}`

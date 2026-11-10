@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAction, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { KOSYNC_PATH } from "../../convex/shared";
 import { copyText } from "../lib/clipboard";
 import { Close } from "../ui/icons";
-
-/** The KOReader sync API lives on the deployment's HTTP host (.convex.site, not .convex.cloud). */
-const serverUrl = `${String(import.meta.env.VITE_CONVEX_URL ?? "").replace(/\.convex\.cloud\/?$/, ".convex.site")}${KOSYNC_PATH}`;
 
 /** Setting up an e-reader (CrossPoint on the Xteink, or KOReader) to sync reading positions with Ribbon. */
 export function EReaderSync({ onClose }: { onClose: () => void }) {
@@ -56,7 +52,7 @@ export function EReaderSync({ onClose }: { onClose: () => void }) {
         </p>
 
         <dl className="mt-5 space-y-3">
-          <Field label="Server URL" value={serverUrl} />
+          <Field label="Server URL" value={account?.serverUrl ?? "…"} />
           <Field label="Username" value={account?.username ?? "…"} />
           {password ? (
             <Field label="Password" value={password} note="Shown only now. Copy it to the device before closing this." />

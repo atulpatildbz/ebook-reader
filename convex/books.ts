@@ -15,6 +15,13 @@ export async function ownBook(ctx: QueryCtx, userId: Id<"users">, bookId: Id<"bo
   return book && book.userId === userId ? book : null;
 }
 
+/** This user's book with this file (by its SHA-256), if they have one. */
+const bookWithFile = (ctx: QueryCtx, userId: Id<"users">, sha256: string) =>
+  ctx.db
+    .query("books")
+    .withIndex("by_user_sha", (q) => q.eq("userId", userId).eq("sha256", sha256))
+    .first();
+
 /** Who is signed in (null: nobody, or an account that is not allowed). */
 export const me = query({
   args: {},
@@ -66,7 +73,7 @@ export const list = query({
   },
 });
 
-/** Everything needed to open one book: a download URL for the file and the synced position. */
+/** Everything needed to open one book, with a download URL for its file. */
 export const get = query({
   args: { bookId: v.id("books") },
   handler: async (ctx, { bookId }) => {
@@ -99,11 +106,7 @@ export const findBySha = query({
   args: { sha256: v.string() },
   handler: async (ctx, { sha256 }) => {
     const user = await requireUser(ctx);
-    const row = await ctx.db
-      .query("books")
-      .withIndex("by_user_sha", (q) => q.eq("userId", user._id).eq("sha256", sha256))
-      .first();
-    return row?._id ?? null;
+    return (await bookWithFile(ctx, user._id, sha256))?._id ?? null;
   },
 });
 
@@ -135,10 +138,7 @@ export const create = mutation({
       await ctx.storage.delete(args.coverId!);
       args.coverId = undefined;
     }
-    const existing = await ctx.db
-      .query("books")
-      .withIndex("by_user_sha", (q) => q.eq("userId", user._id).eq("sha256", args.sha256))
-      .first();
+    const existing = await bookWithFile(ctx, user._id, args.sha256);
     if (existing) {
       await discard();
       return existing._id;

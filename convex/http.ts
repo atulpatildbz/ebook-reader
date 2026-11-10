@@ -2,14 +2,12 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { auth } from "./auth";
-import { keyHash } from "./kosync";
-import { KOSYNC_PATH } from "./shared";
+import { keyHash, KOSYNC_PATH } from "./kosync";
 
 const http = httpRouter();
 auth.addHttpRoutes(http);
 
 // KOReader sync API, for e-readers (CrossPoint on the Xteink, or KOReader itself).
-// Server URL to give the device: https://<deployment>.convex.site/kosync (KOSYNC_PATH)
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/vnd.koreader.v1+json" } });
 

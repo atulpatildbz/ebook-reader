@@ -10,6 +10,9 @@ import type { Id } from "./_generated/dataModel";
 import { allowedUser, allowedUserById } from "./auth";
 import { findProgress, stored, writeProgress } from "./progress";
 
+/** Where the KOReader sync API lives on the deployment's HTTP host (convex/http.ts). */
+export const KOSYNC_PATH = "/kosync";
+
 const md5Hex = (s: string) => SparkMD5.hash(s);
 
 async function sha256Hex(s: string) {
@@ -77,7 +80,7 @@ export const fingerprintAll = internalMutation({
 
 // ---- The device's password ----
 
-/** The e-reader sign-in, without the password (shown only once, when made). */
+/** The e-reader sign-in and server URL, without the password (shown only once, when made). */
 export const account = query({
   args: {},
   handler: async (ctx) => {
@@ -87,7 +90,11 @@ export const account = query({
       .query("readerKeys")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .first();
-    return { username: key?.username ?? usernameFor(user.email ?? ""), createdAt: key?.createdAt ?? null };
+    return {
+      serverUrl: `${process.env.CONVEX_SITE_URL}${KOSYNC_PATH}`,
+      username: key?.username ?? usernameFor(user.email ?? ""),
+      createdAt: key?.createdAt ?? null,
+    };
   },
 });
 
