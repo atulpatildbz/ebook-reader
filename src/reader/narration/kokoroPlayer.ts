@@ -88,6 +88,9 @@ export class KokoroPlayer implements Player {
   private rate = 1;
   private current = -1; // sentence being heard (or last heard)
   private slots: Slot[] = []; // queued on the audio clock, in order; the first may be playing
+  // The sentence being heard. It's still heard for the output latency after the clock passes its
+  // end and it leaves `slots`, so its last words are shown from here.
+  private heard: Slot | null = null;
   private waitingSince: number | null = null; // playback is waiting on synthesis
   private paused = false;
   private waking = false; // the audio is being started, so it may still report being stopped
@@ -398,6 +401,7 @@ export class KokoroPlayer implements Player {
       s.src.disconnect();
     }
     this.slots = [];
+    this.heard = null;
   }
 
   /** A sentence finished: queue more, or wait for synthesis if there's nothing, or end. */
@@ -425,11 +429,13 @@ export class KokoroPlayer implements Player {
   /** Report the sentence and word being heard, by the audio clock. */
   private update() {
     const ctx = this.ctx;
-    const s = this.slots[0];
-    if (!ctx || !s) return;
-    // The clock runs a little ahead of what's heard.
+    if (!ctx) return;
+    // The clock runs ahead of what's heard (by a lot on phones and Bluetooth).
     const t = ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0);
-    if (t < s.at) return;
+    const next = this.slots[0];
+    if (next && t >= next.at) this.heard = next;
+    const s = this.heard;
+    if (!s) return;
     if (s.index !== this.current) {
       this.current = s.index;
       this.shownWord = -1;

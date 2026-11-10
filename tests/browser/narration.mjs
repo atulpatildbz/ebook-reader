@@ -10,7 +10,8 @@
 //   memory   with the voice loaded, Chrome's processes stay under a limit; playing on doesn't
 //            grow them; a reload gives the memory back
 //   gaps     sentences are queued back to back on the audio clock (no restart between them)
-//   words    the word highlight keeps moving all the way through, past tricky text
+//   words    the word highlight keeps moving all the way through, past tricky text, and reaches
+//            the last word of every sentence, with the output latency a phone reports
 //   resume   play after pause carries on at once, without making speech again
 //
 // Needs a GPU (WebGPU) and downloads the voice model (326 MB) once, into tests/browser/.profile.
@@ -49,6 +50,7 @@ const LIMITS = {
   paragraphGapSeconds: 0.35 / RATE + 0.02, // the pause before a paragraph, at this speed
   wordStallSeconds: 3, // longest the word highlight may sit still while playing
   resumeSeconds: 1.5, // from play after pause to the highlight moving again
+  outputLatency: 0.3, // reported by the audio output, as on an Android phone (more with Bluetooth)
 };
 
 // Text with the cases that have tripped narration up, as a few paragraphs, repeated.
@@ -135,11 +137,13 @@ const page = async (expression) => {
 };
 
 // Before the page's own scripts: note every sound queued on the audio clock, and every change of
-// the word highlighted.
+// the word highlighted (and how far into each sentence it got). The audio output says it lags
+// like a phone's.
 await send("Page.enable");
 await send("Page.addScriptToEvaluateOnNewDocument", {
   source: `
-    window.__test = { queued: [], stops: 0, wordChanges: [], lastWordAt: 0, states: [] };
+    Object.defineProperty(AudioContext.prototype, "outputLatency", { get: () => ${LIMITS.outputLatency} });
+    window.__test = { queued: [], stops: 0, wordChanges: [], lastWordAt: 0, states: [], reached: {} };
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (when = 0, ...rest) {
       __test.ctx = this.context;
@@ -151,6 +155,14 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
     new MutationObserver(() => {
       const w = document.querySelector('[data-spoken="word"]');
       if (w && w !== __test.word) { __test.word = w; __test.lastWordAt = performance.now(); __test.wordChanges.push(performance.now()); }
+      const s = w?.closest("[data-sentence]");
+      if (s) {
+        // The last word said: a token of punctuation alone (" ...") isn't, so it may never be lit.
+        const words = [...s.querySelectorAll(":scope > span")];
+        const said = words.findLastIndex((x) => /[\\p{L}\\p{N}]/u.test(x.textContent));
+        const r = (__test.reached[s.dataset.sentence] ??= { word: -1, said, last: words[said]?.textContent });
+        r.word = Math.max(r.word, words.indexOf(w));
+      }
     }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-spoken"] });
     // What the page says it's doing, by both clocks, so stops it owns up to ("getting ahead") can
     // be told apart from gaps it doesn't know about.
@@ -259,6 +271,16 @@ try {
     "words: highlight keeps moving",
     changes.length > 100 && stall <= LIMITS.wordStallSeconds && sinceLast <= LIMITS.wordStallSeconds,
     `${changes.length} word changes, longest still while playing ${stall.toFixed(1)} s, last ${sinceLast.toFixed(1)} s ago`,
+  );
+
+  // Every sentence heard to the end (the next one started) had its last word highlighted.
+  const reached = await page("__test.reached");
+  const finished = Object.entries(reached).filter(([i]) => reached[Number(i) + 1]);
+  const short = finished.filter(([, r]) => r.word < r.said);
+  check(
+    "words: highlight reaches the last word",
+    finished.length > 20 && short.length === 0,
+    `${finished.length} sentences heard to the end, ${short.length} stopped short (output latency ${LIMITS.outputLatency} s)${short.length ? ": " + short.slice(0, 3).map(([i, r]) => `sentence ${i} at word ${r.word + 1}, not ${r.said + 1} ("${r.last}")`).join("; ") : ""}`,
   );
 
   // Pause, then play: carries on at once.
