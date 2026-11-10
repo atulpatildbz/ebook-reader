@@ -6,10 +6,12 @@ import { duration } from "../../lib/format";
 import { ChevronDown, Close, PauseIcon, PlayIcon, SkipBack, SkipForward } from "../../ui/icons";
 import type { NarrationState } from "./narrator";
 import { REBUFFER_SECONDS } from "./kokoroPlayer";
-import { DEVICE_VOICE, KOKORO_VOICES } from "./voices";
+import { AUTO_VOICE, DEVICE_VOICE, KOKORO_VOICES, SUPERTONIC_VOICES } from "./voices";
 
 const VOICES: [id: string, name: string][] = [
+  [AUTO_VOICE, "Automatic"],
   ...KOKORO_VOICES.map((v): [string, string] => [v.id, `${v.name} (${v.accent}${"note" in v ? `, ${v.note}` : ""})`]),
+  ...SUPERTONIC_VOICES.map((v): [string, string] => [v.id, `Light ${v.name} (${v.gender}, faster)`]),
   [DEVICE_VOICE, "This device's voice"],
 ];
 
@@ -29,7 +31,7 @@ const BOTTOM = 4;
  * holding things up.
  */
 export function narrationStatus(state: NarrationState, rate: number): string {
-  const { status, download, engine, fallback, error, speed, rebuffering, ahead, left } = state;
+  const { status, download, engine, fallback, light, error, speed, rebuffering, ahead, left } = state;
   if (error) return `Narration stopped: ${error}`;
   if (status === "loading" && download?.total) return `Downloading the voice, once: ${Math.round((download.loaded / download.total) * 100)}% of ${Math.round(download.total / 1e6)} MB`;
   if (status === "loading" && ahead !== null && rebuffering) {
@@ -41,6 +43,7 @@ export function narrationStatus(state: NarrationState, rate: number): string {
   const parts: string[] = [];
   if (fallback === "no-gpu") parts.push("Device voice (natural voices need WebGPU)");
   if (fallback === "language") parts.push("Device voice (natural voices read English only)");
+  if (light && engine === "kokoro") parts.push(`Light voice (the natural one is too slow here at ${rate}×)`);
   if (left !== null) parts.push(`${duration(left / rate)} left in chapter at ${rate}×`);
   if (ahead !== null && engine === "kokoro") parts.push(ahead.complete ? "rest of chapter ready" : `${duration(ahead.seconds / rate)} ready ahead`);
   return parts.join(" · ");

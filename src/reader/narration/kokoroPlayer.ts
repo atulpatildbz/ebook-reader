@@ -11,6 +11,7 @@ import type { WordTiming } from "./align";
 import type { Device, Dtype, FromWorker, ToWorker } from "./kokoro.worker";
 import type { Events, Player, Sentence, Stats } from "./player";
 import { stretch } from "./stretch";
+import { engineOf, type Engine } from "./voices";
 
 // How far ahead to synthesize, in seconds of speech at normal pace (about 14 MB as 16-bit audio).
 const AHEAD_SECONDS = 300;
@@ -63,7 +64,7 @@ function silence(seconds: number, rate = 8000): string {
 }
 
 export class KokoroPlayer implements Player {
-  private worker!: Worker;
+  private worker: Worker | null = null; // started when first needed, for the model the voice needs
   private ready: Promise<void> | null = null;
   private onReady = () => {};
   private ctx: AudioContext | null = null;
@@ -99,28 +100,52 @@ export class KokoroPlayer implements Player {
     public events: Events,
     private dtype?: Dtype,
   ) {
-    this.spawn();
     this.media.src = silence(10);
     this.media.loop = true;
     this.media.onpause = () => this.media.paused && this.interrupted();
   }
 
-  private spawn() {
-    this.worker = new Worker(new URL("./kokoro.worker.ts", import.meta.url), { type: "module" });
-    this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
-    this.worker.onerror = (e) => this.broken(e.message || "The voice could not start");
+  // The model the worker runs, from the voice: one at a time, as each takes a few hundred MB.
+  private engine: Engine = "kokoro";
+
+  private spawn(): Worker {
+    const w =
+      this.engine === "supertonic"
+        ? new Worker(new URL("./supertonic.worker.ts", import.meta.url), { type: "module" })
+        : new Worker(new URL("./kokoro.worker.ts", import.meta.url), { type: "module" });
+    w.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
+    w.onerror = (e) => this.broken(e.message || "The voice could not start");
+    return w;
   }
 
   /** The model can't be used: stop, start again from nothing next time, and say why. */
   private broken(message: string) {
     this.stop();
-    this.worker.terminate();
-    this.spawn();
+    this.restart();
+    this.events.onError(message);
+    this.onReady(); // lets a play() still waiting on the load finish (it finds it was stopped)
+  }
+
+  /** A new worker, with nothing loaded or asked of it yet. */
+  private restart() {
+    this.worker?.terminate();
+    this.worker = null;
     this.requests.clear();
     this.failedInARow = 0;
     this.ready = null;
-    this.events.onError(message);
-    this.onReady(); // lets a play() still waiting on the load finish (it finds it was stopped)
+  }
+
+  /** Run the model that speaks in `voice`, putting the other one away. */
+  private useEngine(voice: string) {
+    const engine = engineOf(voice);
+    if (engine === this.engine) return;
+    this.engine = engine;
+    this.restart();
+    this.onReady(); // a play() still waiting on the old model's load finds it was stopped
+    // Speed so far was the other model's.
+    this.totals = { audio: 0, gen: 0, chars: 0 };
+    this.recent = [];
+    this.stats = { stalls: this.stats.stalls };
   }
 
   /** Something else took the sound away (a call, another app): show paused, not playing in silence. */
@@ -140,7 +165,8 @@ export class KokoroPlayer implements Player {
   }
 
   private send(msg: ToWorker) {
-    this.worker.postMessage(msg);
+    // Nothing to cancel in a worker not started yet; anything else starts it.
+    if (this.worker || msg.type !== "cancel") (this.worker ??= this.spawn()).postMessage(msg);
   }
 
   private load() {
@@ -188,7 +214,7 @@ export class KokoroPlayer implements Player {
       while (this.recent.length > 1 && this.recent.reduce((a, r) => a + r.audio, 0) - this.recent[0].audio >= 120) this.recent.shift();
       const sum = (k: "audio" | "gen") => this.recent.reduce((a, r) => a + r[k], 0);
       const recent = this.recent.length ? sum("audio") / sum("gen") : spoken / gen;
-      this.setStats({ speed: { avg: this.totals.audio / this.totals.gen, recent } });
+      this.setStats({ speed: { avg: this.totals.audio / this.totals.gen, recent, seconds: this.totals.audio } });
       if (!req) return;
       const pcm = new Int16Array(msg.samples.length);
       for (let i = 0; i < pcm.length; i++) pcm[i] = Math.max(-1, Math.min(1, msg.samples[i])) * 0x7fff;
@@ -252,6 +278,7 @@ export class KokoroPlayer implements Player {
       this.ctx.onstatechange = () => this.ctx?.state !== "running" && this.interrupted();
     }
     this.wake();
+    this.useEngine(voice);
     this.sentences = sentences;
     this.voice = voice;
     this.rate = rate;
@@ -306,7 +333,7 @@ export class KokoroPlayer implements Player {
       const text = this.sentences[i].text;
       this.requests.set(id, { key, pace, chars: text.length });
       pending.add(key);
-      this.send({ type: "speak", id, text, voice: this.voice, speed: pace });
+      this.send({ type: "speak", id, text, voice: this.voice.replace(/^st:/, ""), speed: pace });
     }
   }
 
@@ -459,7 +486,7 @@ export class KokoroPlayer implements Player {
 
   dispose() {
     this.stop();
-    this.worker.terminate();
+    this.worker?.terminate();
     void this.ctx?.close();
   }
 }

@@ -12,6 +12,7 @@ behaviour we want.
 | `sentences.json` | Splitting text into the pieces read aloud (abbreviations, ellipses, long sentences) |
 | `word-span.json` | Which characters of a word are highlighted; punctuation-only "words" aren't |
 | `align.json` | Word timings from the voice model's output, recorded from Kokoro so no model is needed |
+| `estimate-words.json` | Word timings estimated from text and audio, for a voice that doesn't report them (Supertonic) |
 | `stretch.json` | Speeding speech up or down: same pitch, right length, no clicks, fast enough |
 | `page-keys.json` | Which keys turn the page, and when they're left to the control they were pressed on |
 | `position.json` | Stories of reading across devices: what gets saved, what's offered, wrong clocks, sleeping tabs |

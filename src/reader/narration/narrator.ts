@@ -8,7 +8,9 @@ import { wordSpan } from "./sentences";
 import { KokoroPlayer } from "./kokoroPlayer";
 import { BrowserPlayer } from "./browserPlayer";
 import type { Player, Stats } from "./player";
-import { DEVICE_VOICE } from "./voices";
+import { AUTO_VOICE, BEST_VOICE, DEVICE_VOICE, LIGHT_VOICE, engineOf } from "./voices";
+import { prefetchModel } from "./supertonicFiles";
+import { readStored, writeStored } from "../../lib/storage";
 
 type NarrationStatus = "idle" | "loading" | "playing" | "paused";
 export type NarrationState = {
@@ -16,6 +18,8 @@ export type NarrationState = {
   engine: "kokoro" | "device" | null;
   /** Why the device's voice is reading instead of the Kokoro voice chosen. */
   fallback: "language" | "no-gpu" | null;
+  /** Automatic is reading in the light voice: this device makes the best one too slowly. */
+  light: boolean;
   /** How many times faster than real time this device makes Kokoro speech (recent sentences). */
   speed: number | null;
   /** Speech made ahead of what's playing, in seconds at normal pace (Kokoro only). */
@@ -31,7 +35,7 @@ export type NarrationState = {
   error: string | null;
 };
 
-export const IDLE: NarrationState = { status: "idle", engine: null, fallback: null, speed: null, ahead: null, left: null, stalls: 0, rebuffering: false, download: null, error: null };
+export const IDLE: NarrationState = { status: "idle", engine: null, fallback: null, light: false, speed: null, ahead: null, left: null, stalls: 0, rebuffering: false, download: null, error: null };
 
 type Contents = { index: number; doc: Document };
 
@@ -51,6 +55,15 @@ const hasGPU = () =>
       return false;
     }
   })());
+
+// How fast this device makes speech in the best voice (seconds of speech at normal pace per
+// second), from the last time it was used: what Automatic goes by. Kept on the device; it's
+// measured over the last couple of minutes, so it's the speed once the device has warmed up.
+const BEST_SPEED_KEY = "ribbon:narration-best-speed";
+// The speech made before a speed counts as measured (the first sentences are slow, the GPU warming up).
+const MEASURED_SECONDS = 60;
+// Automatic uses the best voice only with this much to spare over the listening speed.
+const HEADROOM = 1.1;
 
 /** After the reader turns pages themselves, leave them there this long before following again. */
 const HANDS_OFF_MS = 8000;
@@ -75,6 +88,7 @@ export class Narrator {
   private voice = "";
   private rate = 1;
   private startedVoice = ""; // the voice the current playback was started with
+  private speaking = ""; // the voice actually reading: the one chosen, or Automatic's pick
   private state = IDLE;
   // Characters per second of speech at normal pace: measured from Kokoro once it has spoken,
   // until then a typical narration pace.
@@ -130,6 +144,7 @@ export class Narrator {
         this.set({ status: s, download: s === "loading" ? this.state.download : null });
       },
       onStats: (st: Stats) => {
+        this.measured(st);
         if (st.charsPerSecond) this.cps = st.charsPerSecond;
         if (st.ahead) this.set({ ahead: st.ahead });
         if (st.download && st.loadMs === undefined) this.set({ download: st.download });
@@ -227,11 +242,41 @@ export class Narrator {
     this.set({ status: "loading", ahead: null, left: this.leftFrom(from), error: null });
     this.sentence = from;
     this.startedVoice = this.voice;
+    this.speaking = this.pick();
+    this.set({ light: this.voice === AUTO_VOICE && this.speaking === LIGHT_VOICE });
     this.mediaSession();
     const player = await this.engine();
     if (run !== this.run) return;
     this.handedOver = true;
-    void player.play(text.pieces, from, player instanceof KokoroPlayer ? this.voice : "", this.rate);
+    void player.play(text.pieces, from, player instanceof KokoroPlayer ? this.speaking : "", this.rate);
+  }
+
+  /** The voice to read in: the one chosen, or for Automatic the best this device keeps up with. */
+  private pick(): string {
+    if (this.voice !== AUTO_VOICE) return this.voice;
+    const speed = readStored<number>(BEST_SPEED_KEY);
+    return typeof speed === "number" && speed < this.rate * HEADROOM ? LIGHT_VOICE : BEST_VOICE;
+  }
+
+  /**
+   * Note how fast the best voice is made here. If Automatic is reading in it and the device is too
+   * slow for this speed, fetch the light voice now, and move to it when the best one runs out
+   * (instead of stopping to get ahead).
+   */
+  private measured(st: Stats) {
+    if (!st.speed || st.speed.seconds < MEASURED_SECONDS || engineOf(this.speaking) !== "kokoro" || !(this.player instanceof KokoroPlayer)) return;
+    writeStored(BEST_SPEED_KEY, st.speed.recent);
+    if (this.voice !== AUTO_VOICE || st.speed.recent >= this.rate * HEADROOM) return;
+    void prefetchModel();
+    if (st.rebuffering) {
+      const run = this.run;
+      // Once the player has finished reporting: it's in the middle of handling running out.
+      setTimeout(() => {
+        if (run !== this.run || this.voice !== AUTO_VOICE || this.speaking === LIGHT_VOICE || this.state.status !== "loading" || !this.state.rebuffering) return;
+        this.userMovedAt = 0;
+        void this.start(Math.max(0, this.sentence));
+      });
+    }
   }
 
   /** The first piece of `text` (the section being read by default) that starts on the page on screen. */

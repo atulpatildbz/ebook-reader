@@ -1,5 +1,6 @@
-// Text into the pieces the narrator speaks one at a time: sentences, with very long ones cut at
-// a semicolon or comma so each stays well inside what the voice model takes in one go. Each
+// Text into the pieces the narrator speaks one at a time: sentences, with long ones cut at a
+// semicolon or comma. Kokoro's memory for one piece climbs steeply with its length: on a Pixel 9
+// about 2.8 GB at 200 characters but over 5 GB at 260, enough for Android to close the tab. Each
 // piece keeps where it is in its paragraph, so it can be found again in the book.
 
 export type Piece = {
@@ -12,7 +13,7 @@ export type Piece = {
 };
 
 const ABBREV = /\b(Mr|Mrs|Ms|Dr|St|Jr|Sr|Prof|Mt|vs|etc|e\.g|i\.e|No)\.\s*$/i;
-const MAX = 280;
+const MAX = 200;
 
 /** [start, end) narrowed past whitespace at either end. */
 function trim(p: string, s: number, e: number): [number, number] {

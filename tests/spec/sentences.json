@@ -116,7 +116,7 @@
       ]
     },
     {
-      "name": "a sentence over 280 characters is cut after a semicolon",
+      "name": "a sentence over 200 characters is cut after a semicolon",
       "lang": "en",
       "paragraphs": [
         "He walked for a long time through the forest, past the old temple where the priests had sung at dawn, past the river where the women washed their clothes and talked of the coming rains; then, as the sun went down behind the hills and the birds came home to the trees, he reached the edge of the city, tired and hungry and wondering whether anyone there would remember his name."
@@ -135,6 +135,29 @@
           "paragraphStart": false,
           "start": 186,
           "end": 377
+        }
+      ]
+    },
+    {
+      "name": "a sentence of 257 characters is cut after a comma (whole, it took Kokoro over 5 GB on a phone)",
+      "lang": "en",
+      "paragraphs": [
+        "However little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families, that he is considered the rightful property of some one or other of their daughters."
+      ],
+      "pieces": [
+        {
+          "text": "However little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families,",
+          "paragraph": 0,
+          "paragraphStart": true,
+          "start": 0,
+          "end": 172
+        },
+        {
+          "text": "that he is considered the rightful property of some one or other of their daughters.",
+          "paragraph": 0,
+          "paragraphStart": false,
+          "start": 173,
+          "end": 257
         }
       ]
     },

@@ -140,3 +140,100 @@ function proportional(written: { s: number; e: number; w: string }[], spoken: Sp
     return { charStart: x.s, charEnd: x.e, start, end: t };
   });
 }
+
+/**
+ * Word timings for speech from a voice that doesn't say where its words fall (Supertonic): words
+ * are spread over the speech by their length, phrase by phrase, each phrase pinned to a pause
+ * heard in the audio where the text has punctuation.
+ */
+export function estimateWords(text: string, samples: Float32Array, sampleRate: number): WordTiming[] {
+  const written = [...text.matchAll(/\S+/g)].map((m) => ({ s: m.index!, e: m.index! + m[0].length, w: m[0] }));
+  if (!written.length) return [];
+  const { from, to, gaps } = pauses(samples, sampleRate);
+  const weights = written.map((x) => (LETTER.test(x.w) ? estimate(x.w) + 0.5 : 0));
+  // Boundaries after words ending a phrase, and when the speech would get there without pauses.
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const bounds: { after: number; expected: number }[] = [];
+  let acc = 0;
+  for (let i = 0; i < written.length - 1; i++) {
+    acc += weights[i];
+    if (/[,;:.!?…—–)"”’]$/.test(written[i].w) || /^[—–("“‘]/.test(written[i + 1].w)) bounds.push({ after: i, expected: from + ((to - from) * acc) / total });
+  }
+  // Match boundaries to pauses in order, each pause at most once, nearest overall.
+  const B = bounds.length;
+  const G = gaps.length;
+  const SKIP = 0.6; // seconds of mismatch a boundary without a pause (or a pause without one) costs
+  const dp = Array.from({ length: B + 1 }, () => new Float64Array(G + 1).fill(Infinity));
+  const mv = Array.from({ length: B + 1 }, () => new Int8Array(G + 1));
+  dp[0].fill(0);
+  for (let j = 0; j <= G; j++) dp[0][j] = j * SKIP * 0.5;
+  for (let i = 1; i <= B; i++) {
+    for (let j = 0; j <= G; j++) {
+      let best = dp[i - 1][j] + SKIP;
+      let m = 0;
+      if (j > 0) {
+        const mid = (gaps[j - 1].start + gaps[j - 1].end) / 2;
+        const c = dp[i - 1][j - 1] + Math.abs(mid - bounds[i - 1].expected);
+        if (c < best) (best = c), (m = 1);
+        if (dp[i][j - 1] + SKIP * 0.5 < best) (best = dp[i][j - 1] + SKIP * 0.5), (m = 2);
+      }
+      dp[i][j] = best;
+      mv[i][j] = m;
+    }
+  }
+  const pinned = new Map<number, { start: number; end: number }>();
+  for (let i = B, j = G; i > 0; ) {
+    const m = mv[i][j];
+    if (m === 1) pinned.set(bounds[i - 1].after, gaps[j - 1]), i--, j--;
+    else if (m === 2) j--;
+    else i--;
+  }
+  // Spread each stretch of words between pinned pauses over its stretch of speech.
+  const out: WordTiming[] = [];
+  let first = 0;
+  let start = from;
+  for (let i = 0; i < written.length; i++) {
+    const gap = pinned.get(i);
+    if (!gap && i < written.length - 1) continue;
+    const end = gap ? gap.start : to;
+    const w = weights.slice(first, i + 1);
+    const sum = w.reduce((a, b) => a + b, 0);
+    let t = start;
+    for (let k = first; k <= i; k++) {
+      const d = sum ? ((end - start) * w[k - first]) / sum : 0;
+      out.push({ charStart: written[k].s, charEnd: written[k].e, start: t, end: t + d });
+      t += d;
+    }
+    first = i + 1;
+    start = gap ? gap.end : end;
+  }
+  return out;
+}
+
+/** Where speech starts and ends in `samples`, and the pauses within it, in seconds. */
+function pauses(samples: Float32Array, sampleRate: number) {
+  const hop = Math.round(sampleRate / 100); // 10 ms
+  const n = Math.floor(samples.length / hop);
+  const rms = new Float32Array(n);
+  let peak = 0;
+  for (let f = 0; f < n; f++) {
+    let s = 0;
+    for (let i = f * hop; i < (f + 1) * hop; i++) s += samples[i] * samples[i];
+    rms[f] = Math.sqrt(s / hop);
+    peak = Math.max(peak, rms[f]);
+  }
+  const quiet = (f: number) => rms[f] < peak * 0.03;
+  let a = 0;
+  while (a < n && quiet(a)) a++;
+  let b = n - 1;
+  while (b > a && quiet(b)) b--;
+  const gaps: { start: number; end: number }[] = [];
+  for (let f = a; f <= b; f++) {
+    if (!quiet(f)) continue;
+    let g = f;
+    while (g <= b && quiet(g)) g++;
+    if (g - f >= 12) gaps.push({ start: f / 100, end: g / 100 }); // 120 ms or more
+    f = g;
+  }
+  return { from: a / 100, to: n ? (b + 1) / 100 : 0, gaps };
+}

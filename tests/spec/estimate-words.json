@@ -1,0 +1,50 @@
+{
+  "about": "Word timings for a voice that doesn't report them (Supertonic), estimated from the text and the audio. Input: the text, and audio described as a list of stretches, each sound (a steady tone) or silence, at `sampleRate`. Output: one timing per whitespace-separated word, in order; only the words listed in `expected` are checked, each start and end within `tolerance` seconds. Pauses in the audio are matched to punctuation in the text, in order; words between them share the sound by their length.",
+  "tolerance": 0.03,
+  "cases": [
+    {
+      "name": "leading and trailing silence aren't given to any word",
+      "text": "Mr. Bennet replied that he had not.",
+      "sampleRate": 24000,
+      "audio": [{ "silence": 0.4 }, { "sound": 2.0 }, { "silence": 0.5 }],
+      "expected": [
+        { "word": "Mr.", "start": 0.4 },
+        { "word": "not.", "end": 2.4 }
+      ]
+    },
+    {
+      "name": "each pause is pinned to the comma or semicolon it falls nearest",
+      "text": "It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.",
+      "sampleRate": 24000,
+      "audio": [{ "silence": 0.5 }, { "sound": 2.1 }, { "silence": 0.4 }, { "sound": 2.6 }, { "silence": 0.35 }, { "sound": 1.4 }, { "silence": 0.3 }],
+      "expected": [
+        { "word": "It", "start": 0.5 },
+        { "word": "acknowledged,", "end": 2.6 },
+        { "word": "that", "start": 3.0 },
+        { "word": "fortune,", "end": 5.6 },
+        { "word": "must", "start": 5.95 },
+        { "word": "wife.", "end": 7.35 }
+      ]
+    },
+    {
+      "name": "a comma said without a pause leaves the words spread evenly by length",
+      "text": "Yes, said she.",
+      "sampleRate": 24000,
+      "audio": [{ "sound": 1.2 }],
+      "expected": [
+        { "word": "Yes,", "start": 0 },
+        { "word": "she.", "end": 1.2 }
+      ]
+    },
+    {
+      "name": "a pause with no punctuation near it doesn't move the words around it",
+      "text": "The boatman was asleep and the water was black and still.",
+      "sampleRate": 24000,
+      "audio": [{ "sound": 1.5 }, { "silence": 0.2 }, { "sound": 1.5 }],
+      "expected": [
+        { "word": "The", "start": 0 },
+        { "word": "still.", "end": 3.2 }
+      ]
+    }
+  ]
+}

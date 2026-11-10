@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { splitPieces, wordSpan } from "../src/reader/narration/sentences.ts";
-import { alignWords } from "../src/reader/narration/align.ts";
+import { alignWords, estimateWords } from "../src/reader/narration/align.ts";
 import { stretch } from "../src/reader/narration/stretch.ts";
 import { pageKey } from "../src/reader/keys.ts";
 
@@ -43,6 +43,31 @@ for (const c of align.cases) {
       near(w.start, e.start, align.tolerance, `"${e.word}" start`);
       near(w.end, e.end, align.tolerance, `"${e.word}" end`);
     });
+  });
+}
+
+const estimated = spec("estimate-words");
+for (const c of estimated.cases) {
+  test(`estimate words: ${c.name}`, () => {
+    const parts = c.audio.map((a) => {
+      const n = Math.round((a.sound ?? a.silence) * c.sampleRate);
+      const x = new Float32Array(n);
+      if (a.sound) for (let i = 0; i < n; i++) x[i] = 0.5 * Math.sin((2 * Math.PI * 220 * i) / c.sampleRate);
+      return x;
+    });
+    const samples = new Float32Array(parts.reduce((a, p) => a + p.length, 0));
+    parts.reduce((at, p) => (samples.set(p, at), at + p.length), 0);
+    const words = estimateWords(c.text, samples, c.sampleRate);
+    assert.deepEqual(
+      words.map((w) => c.text.slice(w.charStart, w.charEnd)),
+      [...c.text.matchAll(/\S+/g)].map((m) => m[0]),
+      "one timing per word, in order",
+    );
+    for (const e of c.expected) {
+      const w = words.find((w) => c.text.slice(w.charStart, w.charEnd) === e.word);
+      if (e.start !== undefined) near(w.start, e.start, estimated.tolerance, `"${e.word}" start`);
+      if (e.end !== undefined) near(w.end, e.end, estimated.tolerance, `"${e.word}" end`);
+    }
   });
 }
 

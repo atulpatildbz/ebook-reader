@@ -6,7 +6,7 @@ import { KokoroPlayer } from "../reader/narration/kokoroPlayer";
 import { BrowserPlayer } from "../reader/narration/browserPlayer";
 import type { Player, Stats } from "../reader/narration/player";
 import { splitPieces, type Piece } from "../reader/narration/sentences";
-import { DEFAULT_VOICE, KOKORO_VOICES } from "../reader/narration/voices";
+import { BEST_VOICE, KOKORO_VOICES, SUPERTONIC_VOICES } from "../reader/narration/voices";
 
 const SAMPLE = `It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.
 
@@ -46,7 +46,7 @@ export function NarrationHarness() {
   const [text, setText] = useState(SAMPLE);
   const [editing, setEditing] = useState(false);
   const [engine, setEngine] = useState<Engine>(hasWebGPU ? "webgpu" : "wasm");
-  const [voice, setVoice] = useState(DEFAULT_VOICE);
+  const [voice, setVoice] = useState(BEST_VOICE);
   const [browserVoice, setBrowserVoice] = useState("");
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [rate, setRate] = useState(1);
@@ -176,11 +176,20 @@ export function NarrationHarness() {
             </select>
           ) : (
             <select className={field} value={voice} onChange={(e) => setVoice(e.target.value)}>
-              {KOKORO_VOICES.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {`${v.name} · ${v.accent} ${v.gender}${"note" in v ? `, ${v.note}` : ""} · ${v.grade}`}
-                </option>
-              ))}
+              <optgroup label="Kokoro">
+                {KOKORO_VOICES.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {`${v.name} · ${v.accent} ${v.gender}${"note" in v ? `, ${v.note}` : ""} · ${v.grade}`}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Supertonic (lighter, for phones)">
+                {SUPERTONIC_VOICES.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {`${v.name} · ${v.gender}`}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           )}
         </label>

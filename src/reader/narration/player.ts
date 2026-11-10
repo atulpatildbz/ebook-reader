@@ -6,8 +6,11 @@ export type Stats = {
   dtype?: string;
   loadMs?: number;
   download?: { loaded: number; total: number };
-  /** Seconds of audio per second of synthesis: all sentences so far, and the last two minutes' worth. */
-  speed?: { avg: number; recent: number };
+  /**
+   * Seconds of audio per second of synthesis: all sentences so far, and the last two minutes'
+   * worth; `seconds` of speech (at normal pace) made so far.
+   */
+  speed?: { avg: number; recent: number; seconds: number };
   /** Times playback had to wait for synthesis, and the total wait. */
   stalls: { count: number; seconds: number };
   /** Waiting until well ahead before playing on: it ran out, or is known to be slower than the speed. */
